@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <chrono>
 #include <vector>
+#include <numeric>
 
 namespace pa1 {
 
@@ -25,6 +26,25 @@ double time_median_ms(Fn&& fn, int warmup, int reps) {
     }
     std::sort(samples.begin(), samples.end());
     return samples[samples.size() / 2];
+}
+
+template <class Fn>
+double time_mean_ms(Fn&& fn, int warmup, int reps) {
+    using clock = std::chrono::steady_clock;
+    for (int i = 0; i < warmup; ++i) fn();
+
+    std::vector<double> samples;
+    samples.reserve(reps);
+    for (int i = 0; i < reps; ++i) {
+        auto t0 = clock::now();
+        fn();
+        auto t1 = clock::now();
+        samples.push_back(
+            std::chrono::duration<double, std::milli>(t1 - t0).count()
+        );
+    }
+    double sum = std::accumulate(samples.begin(), samples.end(), 0);
+    return sum / samples.size();
 }
 
 }  // namespace pa1
