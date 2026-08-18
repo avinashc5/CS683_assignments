@@ -5,18 +5,22 @@ cd "$(dirname "$0")"
 
 SIZES=(512 1024 2048 4096 8192)
 KERNELS=(3 5)
-ALL_STRATEGIES=(1 2 3 4)
-ALL_STRAT_NAMES=("unroll_ox" "unroll_kx" "unroll_ky" "unroll_ox_oy")
+ALL_STRATEGIES=(1 2 3 4 5 6 7 8)
+ALL_STRAT_NAMES=("unroll_ox" "unroll_kx" "unroll_ky" "unroll_ox_oy" "reord_unroll_ox" "reord_unroll_oy" "reord_unroll_ox_oy" "reord_unroll_kx")
 SRC=src/conv_unroll.cpp
 OUT=unroll_results.txt
 
 usage() {
     echo "Usage: $0 [strategy]"
     echo ""
-    echo "  strategy: 1 = unroll_ox     (unroll output columns by 4)"
-    echo "            2 = unroll_kx     (unroll kernel columns by 4)"
-    echo "            3 = unroll_ky     (unroll kernel rows by 4)"
-    echo "            4 = unroll_ox_oy  (2D output unroll, 4x4 block)"
+    echo "  strategy: 1 = unroll_ox          (unroll output columns by 4)"
+    echo "            2 = unroll_kx          (unroll kernel columns by 4)"
+    echo "            3 = unroll_ky          (unroll kernel rows by 4)"
+    echo "            4 = unroll_ox_oy       (2D output unroll, 4x4 block)"
+    echo "            5 = reord_unroll_ox    (reordered + unroll ox by 4)"
+    echo "            6 = reord_unroll_oy    (reordered + unroll oy by 4)"
+    echo "            7 = reord_unroll_ox_oy (reordered + 4x4 block)"
+    echo "            8 = reord_unroll_kx    (reordered + unroll kx by 4)"
     echo "            (omit to run all strategies)"
     exit 0
 }
@@ -26,7 +30,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 fi
 
 if [[ -n "${1:-}" ]]; then
-    if [[ "$1" -lt 1 || "$1" -gt 4 ]]; then
+    if [[ "$1" -lt 1 || "$1" -gt 8 ]]; then
         echo "Error: strategy must be 1-4"
         usage
     fi
