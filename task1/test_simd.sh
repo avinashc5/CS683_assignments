@@ -5,16 +5,17 @@ cd "$(dirname "$0")"
 
 SIZES=(512 1024 2048 4096 8192)
 KERNELS=(3 5)
-ALL_WIDTHS=(128 256)
-ALL_WIDTH_NAMES=("SSE_128" "AVX2_256")
+ALL_WIDTHS=(128 256 512)
+ALL_WIDTH_NAMES=("SSE_128" "AVX2_256" "AVX512_512")
 SRC=src/conv_simd.cpp
 OUT=simd_results.txt
 
 usage() {
     echo "Usage: $0 [width]"
     echo ""
-    echo "  width: 128 = SSE  (4 floats per vector)"
-    echo "         256 = AVX2 (8 floats per vector)"
+    echo "  width: 128 = SSE     (4 floats per vector)"
+    echo "         256 = AVX2    (8 floats per vector)"
+    echo "         512 = AVX-512 (16 floats per vector)"
     echo "         (omit to run all widths)"
     exit 0
 }
@@ -28,7 +29,7 @@ PIN="taskset -c 0"
 # Check if perf is available for instruction count
 HAS_PERF=0
 if command -v perf &>/dev/null; then
-    perf_test=$($PIN perf stat -e instructions -- true 2>&1)
+    perf_test=$($PIN perf stat -e instructions -- true 2>&1 || true)
     if echo "$perf_test" | grep -v "not supported" | grep -v "not counted" | grep -qw "instructions"; then
         HAS_PERF=1
     fi
@@ -42,17 +43,12 @@ fi
 
 # Filter widths if argument given
 if [[ -n "${1:-}" ]]; then
-    if [[ "$1" != "128" && "$1" != "256" ]]; then
-        echo "Error: width must be 128 or 256"
-        exit 1
-    fi
-    if [[ "$1" == "128" ]]; then
-        WIDTHS=(128)
-        WIDTH_NAMES=("SSE_128")
-    else
-        WIDTHS=(256)
-        WIDTH_NAMES=("AVX2_256")
-    fi
+    case "$1" in
+        128) WIDTHS=(128); WIDTH_NAMES=("SSE_128")    ;;
+        256) WIDTHS=(256); WIDTH_NAMES=("AVX2_256")   ;;
+        512) WIDTHS=(512); WIDTH_NAMES=("AVX512_512") ;;
+        *)   echo "Error: width must be 128, 256, or 512"; exit 1 ;;
+    esac
 else
     WIDTHS=("${ALL_WIDTHS[@]}")
     WIDTH_NAMES=("${ALL_WIDTH_NAMES[@]}")

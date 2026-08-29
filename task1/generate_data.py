@@ -156,7 +156,10 @@ if os.path.exists(path):
 # ============================================================================
 # SIMD results
 # ============================================================================
-WIDTH_KEYS = {'SSE_128': 'SSE', 'AVX2_256': 'AVX'}
+# These values become part of a LaTeX command name, which may contain letters
+# only -- '\simdAVX512...' would parse as '\simdAVX' followed by stray text.
+# Hence 'AVXFiveTwelve', matching how SIZE_KEYS already spells 512 as 'Ftwelve'.
+WIDTH_KEYS = {'SSE_128': 'SSE', 'AVX2_256': 'AVX', 'AVX512_512': 'AVXFiveTwelve'}
 
 path = os.path.join(BASE, 'simd_results.txt')
 if os.path.exists(path):

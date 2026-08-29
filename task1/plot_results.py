@@ -142,13 +142,21 @@ def plot_simd():
             data[K][width_name][size]['naive_insns'] = naive_insns
             data[K][width_name][size]['simd_insns'] = simd_insns
 
-    width_colors = {'SSE_128': 'tab:blue', 'AVX2_256': 'tab:orange'}
+    width_colors = {'SSE_128': 'tab:blue', 'AVX2_256': 'tab:orange',
+                    'AVX512_512': 'tab:green'}
+    # Plot by increasing vector width, not alphabetically ('AVX2_256' would
+    # otherwise sort before 'AVX512_512' before 'SSE_128').
+    width_order = ['SSE_128', 'AVX2_256', 'AVX512_512']
+
+    def ordered_widths(k):
+        known = [w for w in width_order if w in data[k]]
+        return known + sorted(w for w in data[k] if w not in width_order)
 
     for K in sorted(data.keys()):
         # --- Speedup vs Matrix Size ---
         fig, ax = plt.subplots(figsize=(8, 5))
         ax.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5, label='Naive (1.0x)')
-        for wn in sorted(data[K].keys()):
+        for wn in ordered_widths(K):
             vals = [data[K][wn].get(s, {}).get('speedup') for s in SIZES]
             if any(v is not None for v in vals):
                 ax.plot(SIZE_LABELS, [v if v else 0 for v in vals],
@@ -167,7 +175,10 @@ def plot_simd():
         # --- Instruction count comparison (bar chart) ---
         fig, ax = plt.subplots(figsize=(9, 5))
         x = np.arange(len(SIZES))
-        width = 0.25
+        wnames = ordered_widths(K)
+        nbars = len(wnames) + 1              # naive + one bar per SIMD width
+        width = 0.8 / nbars                  # keep each cluster inside its tick
+        offs = [(i - (nbars - 1) / 2) * width for i in range(nbars)]
         # naive
         naive_vals = []
         for s in SIZES:
@@ -178,11 +189,11 @@ def plot_simd():
                     break
             else:
                 naive_vals.append(0)
-        ax.bar(x - width, naive_vals, width, label='Naive', color='tab:gray')
-        for i, wn in enumerate(sorted(data[K].keys())):
+        ax.bar(x + offs[0], naive_vals, width, label='Naive', color='tab:gray')
+        for i, wn in enumerate(wnames):
             vals = [(data[K][wn].get(s, {}).get('simd_insns') or 0) / 1e9 for s in SIZES]
-            ax.bar(x + i * width, vals, width, label=wn,
-                   color=width_colors.get(wn, 'tab:green'))
+            ax.bar(x + offs[i + 1], vals, width, label=wn,
+                   color=width_colors.get(wn, 'tab:purple'))
         ax.set_xlabel('Matrix Size (H = W)')
         ax.set_ylabel('Instructions (billions)')
         ax.set_title(f'Instruction Count: Naive vs SIMD (K={K})')
