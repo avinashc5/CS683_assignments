@@ -1,0 +1,544 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{subcaption}
+\usepackage{enumitem}
+
+\newcommand{\todo}[1]{{\color{red}\textbf{[TODO: #1]}}}
+
+% Auto-generated data macros from benchmark results.
+% Regenerate: cd task1 && python3 generate_data.py
+\input{data.tex}
+
+\title{CS683 Programming Assignment 1 --- Task 1\\
+2D Convolution: The Dhurandhar Way}
+\author{Avinash Chaudhari -- 23B1064 \and Pranay Marumamula -- 23B1073 \and Siddhant Mulkikar -- 23B0956 \and Madhav R Babu -- 23B1060}
+\date{Autumn 2026}
+
+\begin{document}
+\maketitle
+
+% ============================================================================
+\section{System Configuration}
+% ============================================================================
+
+\begin{itemize}
+    \item \textbf{CPU:} Intel Core Ultra 5 125U (12 cores / 14 threads, 2P+8E+2LPE, max 4.3 GHz)
+    \item \textbf{L1-D Cache:} 352 KiB total (10 instances), 64-byte lines, 8-way set associative
+    \item \textbf{L2 Cache:} 10 MiB (5 instances)
+    \item \textbf{L3 Cache:} 12 MiB (1 instance)
+    \item \textbf{Compiler flags:} \texttt{-std=c++17 -O2 -fno-tree-vectorize -mavx2 -mfma}
+    \item \textbf{OS:} Ubuntu Linux, kernel 7.0.0-30-generic (x86\_64)
+    \item \textbf{Pinning:} \texttt{taskset -c 0} (pinned to P-core 0 for consistent results on hybrid CPU)
+\end{itemize}
+
+% ============================================================================
+\section{Task 1A: Loop Unrolling and Reordering (1 point)}
+% ============================================================================
+
+\subsection{Motivation}
+% Q1: What motivated you to make changes to your code?
+
+\todo{Explain what motivated the loop reordering and unrolling optimizations.
+Consider: reducing loop overhead, improving ILP, enabling out-of-order
+execution, improving spatial/temporal locality via reordering.}
+
+\subsection{Implementation Details}
+% Q2: What considerations did you take into account when implementing those changes?
+
+\subsubsection{Loop Reordering}
+
+The naive convolution uses loop order \texttt{oy, ox, ky, kx} (output-major). We implemented a reordered version in \texttt{conv\_reorder.cpp} with loop order \texttt{ky, kx, oy, ox} (kernel-major).
+
+\textbf{Key changes from naive:}
+\begin{itemize}
+    \item The output array must be zeroed before the computation begins, since each kernel position now \emph{accumulates} into the output rather than computing the full sum for each output pixel.
+    \item The kernel weight \texttt{ker[ky*K + kx]} is loaded once and reused across all $H \times W$ output pixels, improving temporal locality on the kernel.
+    \item For each kernel position \texttt{(ky, kx)}, the inner loops stream sequentially over both the input and output arrays row by row, which is cache-friendly for both reads and writes.
+\end{itemize}
+
+\subsubsection{Loop Unrolling (Naive Order)}
+
+We implemented four unrolling strategies in \texttt{conv\_unroll.cpp} (strategies 1--4), all using the naive loop order \texttt{oy, ox, ky, kx}. All use an unroll factor of 4.
+
+\begin{enumerate}
+    \item \textbf{Unroll ox (output columns) by 4:} Computes 4 adjacent output pixels simultaneously using 4 independent accumulators (\texttt{acc0}--\texttt{acc3}). Each accumulator sums the full $K \times K$ kernel independently, so the output is written once (not read-modify-written). This exposes instruction-level parallelism (ILP) since the 4 accumulations are independent. A scalar tail loop handles remaining columns when $W$ is not a multiple of 4.
+
+    \item \textbf{Unroll kx (kernel columns) by 4:} Processes 4 kernel columns per inner-loop iteration, reducing loop overhead. Each iteration performs 4 independent multiply-adds into a single accumulator. A scalar tail handles the remainder when $K$ is not a multiple of 4.
+
+    \item \textbf{Unroll ky (kernel rows) by 4:} Processes 4 kernel rows per iteration of the \texttt{ky} loop. Each iteration loads from 4 different input rows with their respective kernel row weights, accumulating into a single output value. Reduces \texttt{ky} loop overhead and exposes cross-row ILP. Tail handles remaining rows.
+
+    \item \textbf{Unroll ox + oy (2D output block, 4$\times$4):} Processes a 4$\times$4 block of output pixels at once, using 16 independent accumulators (\texttt{a00}--\texttt{a33}). For each kernel position, 4 input rows are loaded and 16 multiply-adds are performed. This maximizes ILP and register utilization. Tail loops handle edge rows and columns.
+\end{enumerate}
+
+\subsubsection{Loop Unrolling (Reordered Order)}
+
+We also implemented four unrolling strategies combined with the reordered loop order \texttt{ky, kx, oy, ox} (strategies 5--8 in \texttt{conv\_unroll.cpp}). All require zeroing the output array first.
+
+\begin{enumerate}
+    \item \textbf{Reorder + unroll ox by 4 (strategy 5):} For each kernel position, the inner \texttt{ox} loop is unrolled by 4, performing 4 read-modify-write accumulations per iteration. Amortizes loop overhead and improves throughput on the output stream.
+
+    \item \textbf{Reorder + unroll oy by 4 (strategy 6):} For each kernel position, processes 4 output rows simultaneously. Loads from 4 input rows (\texttt{r0}--\texttt{r3}) and accumulates into 4 output rows (\texttt{o0}--\texttt{o3}). The kernel weight broadcast is amortized across 4 rows.
+
+    \item \textbf{Reorder + unroll ox and oy (4$\times$4 block, strategy 7):} Combines strategies 5 and 6. For each kernel position, processes a 4$\times$4 block of output pixels, performing 16 read-modify-write accumulations per iteration.
+
+    \item \textbf{Reorder + unroll kx by 4 (strategy 8):} Instead of iterating \texttt{kx} one at a time, processes 4 kernel columns per iteration. For each group of 4 kernel positions, 4 different weights are loaded and 4 multiply-adds are performed per output pixel, sharing the output read-modify-write across 4 kernel positions.
+\end{enumerate}
+
+\subsection{Results}
+% Q3: How effective are your changes?
+
+\subsubsection{Reordering Speedup Table}
+
+\begin{table}[H]
+\centering
+\caption{Loop reordering speedups (K=3)}
+\begin{tabular}{lrrrrr}
+\toprule
+Strategy & 512 & 1024 & 2048 & 4096 & 8192 \\
+\midrule
+Reorder only           & \reorderKthreeFtwelve & \reorderKthreeTtwentyfour & \reorderKthreeTfortyeight & \reorderKthreeFninetysix & \reorderKthreeEonetwelve \\
+Reorder + unroll ox    & \unrollReordOxKthreeFtwelve & \unrollReordOxKthreeTtwentyfour & \unrollReordOxKthreeTfortyeight & \unrollReordOxKthreeFninetysix & \unrollReordOxKthreeEonetwelve \\
+Reorder + unroll oy    & \unrollReordOyKthreeFtwelve & \unrollReordOyKthreeTtwentyfour & \unrollReordOyKthreeTfortyeight & \unrollReordOyKthreeFninetysix & \unrollReordOyKthreeEonetwelve \\
+Reorder + unroll ox+oy & \unrollReordOxOyKthreeFtwelve & \unrollReordOxOyKthreeTtwentyfour & \unrollReordOxOyKthreeTfortyeight & \unrollReordOxOyKthreeFninetysix & \unrollReordOxOyKthreeEonetwelve \\
+Reorder + unroll kx    & \unrollReordKxKthreeFtwelve & \unrollReordKxKthreeTtwentyfour & \unrollReordKxKthreeTfortyeight & \unrollReordKxKthreeFninetysix & \unrollReordKxKthreeEonetwelve \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Loop reordering speedups (K=5)}
+\begin{tabular}{lrrrrr}
+\toprule
+Strategy & 512 & 1024 & 2048 & 4096 & 8192 \\
+\midrule
+Reorder only           & \reorderKfiveFtwelve & \reorderKfiveTtwentyfour & \reorderKfiveTfortyeight & \reorderKfiveFninetysix & \reorderKfiveEonetwelve \\
+Reorder + unroll ox    & \unrollReordOxKfiveFtwelve & \unrollReordOxKfiveTtwentyfour & \unrollReordOxKfiveTfortyeight & \unrollReordOxKfiveFninetysix & \unrollReordOxKfiveEonetwelve \\
+Reorder + unroll oy    & \unrollReordOyKfiveFtwelve & \unrollReordOyKfiveTtwentyfour & \unrollReordOyKfiveTfortyeight & \unrollReordOyKfiveFninetysix & \unrollReordOyKfiveEonetwelve \\
+Reorder + unroll ox+oy & \unrollReordOxOyKfiveFtwelve & \unrollReordOxOyKfiveTtwentyfour & \unrollReordOxOyKfiveTfortyeight & \unrollReordOxOyKfiveFninetysix & \unrollReordOxOyKfiveEonetwelve \\
+Reorder + unroll kx    & \unrollReordKxKfiveFtwelve & \unrollReordKxKfiveTtwentyfour & \unrollReordKxKfiveTfortyeight & \unrollReordKxKfiveFninetysix & \unrollReordKxKfiveEonetwelve \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Unrolling Speedup Table (Naive Order)}
+
+\begin{table}[H]
+\centering
+\caption{Loop unrolling speedups (naive loop order, K=3)}
+\begin{tabular}{lrrrrr}
+\toprule
+Strategy & 512 & 1024 & 2048 & 4096 & 8192 \\
+\midrule
+Unroll ox     & \unrollUnrollOxKthreeFtwelve & \unrollUnrollOxKthreeTtwentyfour & \unrollUnrollOxKthreeTfortyeight & \unrollUnrollOxKthreeFninetysix & \unrollUnrollOxKthreeEonetwelve \\
+Unroll kx     & \unrollUnrollKxKthreeFtwelve & \unrollUnrollKxKthreeTtwentyfour & \unrollUnrollKxKthreeTfortyeight & \unrollUnrollKxKthreeFninetysix & \unrollUnrollKxKthreeEonetwelve \\
+Unroll ky     & \unrollUnrollKyKthreeFtwelve & \unrollUnrollKyKthreeTtwentyfour & \unrollUnrollKyKthreeTfortyeight & \unrollUnrollKyKthreeFninetysix & \unrollUnrollKyKthreeEonetwelve \\
+Unroll ox+oy  & \unrollUnrollOxOyKthreeFtwelve & \unrollUnrollOxOyKthreeTtwentyfour & \unrollUnrollOxOyKthreeTfortyeight & \unrollUnrollOxOyKthreeFninetysix & \unrollUnrollOxOyKthreeEonetwelve \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Loop unrolling speedups (naive loop order, K=5)}
+\begin{tabular}{lrrrrr}
+\toprule
+Strategy & 512 & 1024 & 2048 & 4096 & 8192 \\
+\midrule
+Unroll ox     & \unrollUnrollOxKfiveFtwelve & \unrollUnrollOxKfiveTtwentyfour & \unrollUnrollOxKfiveTfortyeight & \unrollUnrollOxKfiveFninetysix & \unrollUnrollOxKfiveEonetwelve \\
+Unroll kx     & \unrollUnrollKxKfiveFtwelve & \unrollUnrollKxKfiveTtwentyfour & \unrollUnrollKxKfiveTfortyeight & \unrollUnrollKxKfiveFninetysix & \unrollUnrollKxKfiveEonetwelve \\
+Unroll ky     & \unrollUnrollKyKfiveFtwelve & \unrollUnrollKyKfiveTtwentyfour & \unrollUnrollKyKfiveTfortyeight & \unrollUnrollKyKfiveFninetysix & \unrollUnrollKyKfiveEonetwelve \\
+Unroll ox+oy  & \unrollUnrollOxOyKfiveFtwelve & \unrollUnrollOxOyKfiveTtwentyfour & \unrollUnrollOxOyKfiveTfortyeight & \unrollUnrollOxOyKfiveFninetysix & \unrollUnrollOxOyKfiveEonetwelve \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Effectiveness Metric}
+
+\todo{Which metric did you use to quantify effectiveness and why?
+(e.g.\ speedup = naive\_time / optimized\_time, GFlop/s). Justify
+the choice. Discuss how speedup varies with matrix size and kernel
+size.}
+
+\subsection{Analysis}
+
+\todo{Discuss: Which unrolling strategy works best and why? Does reordering
+help? How does the benefit change with matrix size (cache effects)?
+Which combination gives the best result?}
+
+% ============================================================================
+\section{Task 1B: Tiling (1 point)}
+% ============================================================================
+
+\subsection{Profiling Baseline 2D Convolution}
+
+\subsubsection{L1-D Cache Size}
+
+The L1 Data cache on this system is 352 KiB total across 10 instances (P-cores and E-cores have separate L1-D caches). Each L1-D has 64-byte cache lines and is 8-way set associative. When pinned to a single P-core (core 0), the effective L1-D available is approximately 48 KiB.
+
+\subsubsection{Baseline (Naive) L1-D Cache MPKI}
+
+\begin{table}[H]
+\centering
+\caption{Naive convolution L1-D cache MPKI}
+\begin{tabular}{lrr}
+\toprule
+Matrix Size & K=3 MPKI & K=5 MPKI \\
+\midrule
+512x512     & \naiveMPKIKthreeFtwelve & \naiveMPKIKfiveFtwelve \\
+1024x1024   & \naiveMPKIKthreeTtwentyfour & \naiveMPKIKfiveTtwentyfour \\
+2048x2048   & \naiveMPKIKthreeTfortyeight & \naiveMPKIKfiveTfortyeight \\
+4096x4096   & \naiveMPKIKthreeFninetysix & \naiveMPKIKfiveFninetysix \\
+8192x8192   & \naiveMPKIKthreeEonetwelve & \naiveMPKIKfiveEonetwelve \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Implementing Tiled 2D Convolution}
+
+\todo{Describe your tiling approach. What dimension(s) did you tile?
+(e.g.\ horizontal strips of height \texttt{TILE\_H}).
+Explain the algorithm: zero the output strip, then iterate over
+K$\times$K kernel elements, accumulating into the strip.}
+
+\todo{Explain the rationale: why does tiling help? (keeping the output strip
+in L1 cache across K$\times$K passes reduces capacity misses).}
+
+\subsection{Experimenting with Tile Sizes}
+
+\begin{table}[H]
+\centering
+\caption{Tiled convolution: speedup and MPKI for K=3}
+\begin{tabular}{lrrrrrr}
+\toprule
+& \multicolumn{6}{c}{Tile Height} \\
+\cmidrule(lr){2-7}
+Matrix Size & 8 & 16 & 32 & 64 & 128 & 256 \\
+\midrule
+\multicolumn{7}{l}{\textit{Speedup over naive}} \\
+512x512     & \tileEightKthreeFtwelveSpeedup & \tileSixteenKthreeFtwelveSpeedup & \tileThirtytwoKthreeFtwelveSpeedup & \tileSixtyfourKthreeFtwelveSpeedup & \tileOnetwentyeightKthreeFtwelveSpeedup & \tileTwofiftysixKthreeFtwelveSpeedup \\
+1024x1024   & \tileEightKthreeTtwentyfourSpeedup & \tileSixteenKthreeTtwentyfourSpeedup & \tileThirtytwoKthreeTtwentyfourSpeedup & \tileSixtyfourKthreeTtwentyfourSpeedup & \tileOnetwentyeightKthreeTtwentyfourSpeedup & \tileTwofiftysixKthreeTtwentyfourSpeedup \\
+2048x2048   & \tileEightKthreeTfortyeightSpeedup & \tileSixteenKthreeTfortyeightSpeedup & \tileThirtytwoKthreeTfortyeightSpeedup & \tileSixtyfourKthreeTfortyeightSpeedup & \tileOnetwentyeightKthreeTfortyeightSpeedup & \tileTwofiftysixKthreeTfortyeightSpeedup \\
+4096x4096   & \tileEightKthreeFninetysixSpeedup & \tileSixteenKthreeFninetysixSpeedup & \tileThirtytwoKthreeFninetysixSpeedup & \tileSixtyfourKthreeFninetysixSpeedup & \tileOnetwentyeightKthreeFninetysixSpeedup & \tileTwofiftysixKthreeFninetysixSpeedup \\
+8192x8192   & \tileEightKthreeEonetwelveSpeedup & \tileSixteenKthreeEonetwelveSpeedup & \tileThirtytwoKthreeEonetwelveSpeedup & \tileSixtyfourKthreeEonetwelveSpeedup & \tileOnetwentyeightKthreeEonetwelveSpeedup & \tileTwofiftysixKthreeEonetwelveSpeedup \\
+\midrule
+\multicolumn{7}{l}{\textit{L1-D MPKI}} \\
+512x512     & \tileEightKthreeFtwelveMPKI & \tileSixteenKthreeFtwelveMPKI & \tileThirtytwoKthreeFtwelveMPKI & \tileSixtyfourKthreeFtwelveMPKI & \tileOnetwentyeightKthreeFtwelveMPKI & \tileTwofiftysixKthreeFtwelveMPKI \\
+1024x1024   & \tileEightKthreeTtwentyfourMPKI & \tileSixteenKthreeTtwentyfourMPKI & \tileThirtytwoKthreeTtwentyfourMPKI & \tileSixtyfourKthreeTtwentyfourMPKI & \tileOnetwentyeightKthreeTtwentyfourMPKI & \tileTwofiftysixKthreeTtwentyfourMPKI \\
+2048x2048   & \tileEightKthreeTfortyeightMPKI & \tileSixteenKthreeTfortyeightMPKI & \tileThirtytwoKthreeTfortyeightMPKI & \tileSixtyfourKthreeTfortyeightMPKI & \tileOnetwentyeightKthreeTfortyeightMPKI & \tileTwofiftysixKthreeTfortyeightMPKI \\
+4096x4096   & \tileEightKthreeFninetysixMPKI & \tileSixteenKthreeFninetysixMPKI & \tileThirtytwoKthreeFninetysixMPKI & \tileSixtyfourKthreeFninetysixMPKI & \tileOnetwentyeightKthreeFninetysixMPKI & \tileTwofiftysixKthreeFninetysixMPKI \\
+8192x8192   & \tileEightKthreeEonetwelveMPKI & \tileSixteenKthreeEonetwelveMPKI & \tileThirtytwoKthreeEonetwelveMPKI & \tileSixtyfourKthreeEonetwelveMPKI & \tileOnetwentyeightKthreeEonetwelveMPKI & \tileTwofiftysixKthreeEonetwelveMPKI \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Tiled convolution: speedup and MPKI for K=5}
+\begin{tabular}{lrrrrrr}
+\toprule
+& \multicolumn{6}{c}{Tile Height} \\
+\cmidrule(lr){2-7}
+Matrix Size & 8 & 16 & 32 & 64 & 128 & 256 \\
+\midrule
+\multicolumn{7}{l}{\textit{Speedup over naive}} \\
+512x512     & \tileEightKfiveFtwelveSpeedup & \tileSixteenKfiveFtwelveSpeedup & \tileThirtytwoKfiveFtwelveSpeedup & \tileSixtyfourKfiveFtwelveSpeedup & \tileOnetwentyeightKfiveFtwelveSpeedup & \tileTwofiftysixKfiveFtwelveSpeedup \\
+1024x1024   & \tileEightKfiveTtwentyfourSpeedup & \tileSixteenKfiveTtwentyfourSpeedup & \tileThirtytwoKfiveTtwentyfourSpeedup & \tileSixtyfourKfiveTtwentyfourSpeedup & \tileOnetwentyeightKfiveTtwentyfourSpeedup & \tileTwofiftysixKfiveTtwentyfourSpeedup \\
+2048x2048   & \tileEightKfiveTfortyeightSpeedup & \tileSixteenKfiveTfortyeightSpeedup & \tileThirtytwoKfiveTfortyeightSpeedup & \tileSixtyfourKfiveTfortyeightSpeedup & \tileOnetwentyeightKfiveTfortyeightSpeedup & \tileTwofiftysixKfiveTfortyeightSpeedup \\
+4096x4096   & \tileEightKfiveFninetysixSpeedup & \tileSixteenKfiveFninetysixSpeedup & \tileThirtytwoKfiveFninetysixSpeedup & \tileSixtyfourKfiveFninetysixSpeedup & \tileOnetwentyeightKfiveFninetysixSpeedup & \tileTwofiftysixKfiveFninetysixSpeedup \\
+8192x8192   & \tileEightKfiveEonetwelveSpeedup & \tileSixteenKfiveEonetwelveSpeedup & \tileThirtytwoKfiveEonetwelveSpeedup & \tileSixtyfourKfiveEonetwelveSpeedup & \tileOnetwentyeightKfiveEonetwelveSpeedup & \tileTwofiftysixKfiveEonetwelveSpeedup \\
+\midrule
+\multicolumn{7}{l}{\textit{L1-D MPKI}} \\
+512x512     & \tileEightKfiveFtwelveMPKI & \tileSixteenKfiveFtwelveMPKI & \tileThirtytwoKfiveFtwelveMPKI & \tileSixtyfourKfiveFtwelveMPKI & \tileOnetwentyeightKfiveFtwelveMPKI & \tileTwofiftysixKfiveFtwelveMPKI \\
+1024x1024   & \tileEightKfiveTtwentyfourMPKI & \tileSixteenKfiveTtwentyfourMPKI & \tileThirtytwoKfiveTtwentyfourMPKI & \tileSixtyfourKfiveTtwentyfourMPKI & \tileOnetwentyeightKfiveTtwentyfourMPKI & \tileTwofiftysixKfiveTtwentyfourMPKI \\
+2048x2048   & \tileEightKfiveTfortyeightMPKI & \tileSixteenKfiveTfortyeightMPKI & \tileThirtytwoKfiveTfortyeightMPKI & \tileSixtyfourKfiveTfortyeightMPKI & \tileOnetwentyeightKfiveTfortyeightMPKI & \tileTwofiftysixKfiveTfortyeightMPKI \\
+4096x4096   & \tileEightKfiveFninetysixMPKI & \tileSixteenKfiveFninetysixMPKI & \tileThirtytwoKfiveFninetysixMPKI & \tileSixtyfourKfiveFninetysixMPKI & \tileOnetwentyeightKfiveFninetysixMPKI & \tileTwofiftysixKfiveFninetysixMPKI \\
+8192x8192   & \tileEightKfiveEonetwelveMPKI & \tileSixteenKfiveEonetwelveMPKI & \tileThirtytwoKfiveEonetwelveMPKI & \tileSixtyfourKfiveEonetwelveMPKI & \tileOnetwentyeightKfiveEonetwelveMPKI & \tileTwofiftysixKfiveEonetwelveMPKI \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsubsection{Best Tile Size}
+
+\todo{Identify which tile size gives the best performance on your hardware.
+Justify in terms of cache efficiency and execution time.}
+
+\subsection{Plots}
+
+\subsubsection{L1-D MPKI vs.\ Matrix Size}
+
+\begin{figure}[H]
+\centering
+\todo{Insert plot: L1-D MPKI vs.\ Matrix Size for different tile sizes.
+Include naive as baseline. One plot per K value (or combined).}
+% \includegraphics[width=0.8\textwidth]{plots/tile_mpki_vs_size.png}
+\caption{L1-D MPKI vs.\ Matrix Size for different tile sizes}
+\end{figure}
+
+\subsubsection{Speedup vs.\ Matrix Size}
+
+\begin{figure}[H]
+\centering
+\todo{Insert plot: Speedup vs.\ Matrix Size for different tile sizes.}
+% \includegraphics[width=0.8\textwidth]{plots/tile_speedup_vs_size.png}
+\caption{Speedup vs.\ Matrix Size for different tile sizes}
+\end{figure}
+
+\subsection{Analysis Questions}
+
+\subsubsection{Q1: Changes in L1-D MPKI from Naive to Tiled}
+
+\todo{Report the changes in L1-D MPKI observed when moving from naive to
+tiled 2D convolution. Justify your observations --- why does tiling
+reduce (or not reduce) cache misses? Relate to the working set
+fitting in L1.}
+
+\subsubsection{Q2: How L1-D MPKI Varies Across Matrix Sizes and Tile Sizes}
+
+\todo{Explain your findings in terms of the cache hierarchy and working set
+sizes. For example: for small matrices, the entire output may fit in
+cache even without tiling; for large matrices, smaller tiles keep the
+strip in L1. Discuss the sweet spot.}
+
+\subsubsection{Q3: Speedup Analysis}
+
+\todo{Did you achieve a speedup? If yes, quantify the improvement and
+identify the contributing factors (reduced cache misses, better
+spatial locality). If not, analyze the limiting factors (e.g.\
+overhead of zeroing, extra loop control) and propose possible
+solutions.}
+
+% ============================================================================
+\section{Task 1C: SIMD (2 points)}
+% ============================================================================
+
+\subsection{Baseline Profiling}
+
+\subsubsection{Instruction Count for Naive Implementation}
+
+\begin{table}[H]
+\centering
+\caption{Naive convolution instruction count}
+\begin{tabular}{lrr}
+\toprule
+Matrix Size & K=3 Instructions & K=5 Instructions \\
+\midrule
+512x512     & \naiveInsnsKthreeFtwelve & \naiveInsnsKfiveFtwelve \\
+1024x1024   & \naiveInsnsKthreeTtwentyfour & \naiveInsnsKfiveTtwentyfour \\
+2048x2048   & \naiveInsnsKthreeTfortyeight & \naiveInsnsKfiveTfortyeight \\
+4096x4096   & \naiveInsnsKthreeFninetysix & \naiveInsnsKfiveFninetysix \\
+8192x8192   & \naiveInsnsKthreeEonetwelve & \naiveInsnsKfiveEonetwelve \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{SIMD Implementation}
+
+\subsubsection{128-bit (SSE)}
+
+\todo{Describe the 128-bit SSE implementation. Which intrinsics did you use?
+(e.g.\ \texttt{\_mm\_loadu\_ps}, \texttt{\_mm\_set1\_ps},
+\texttt{\_mm\_fmadd\_ps}, \texttt{\_mm\_storeu\_ps}).
+How many floats per vector? (4). Explain the vectorization strategy
+--- which loop is vectorized (ox) and how.}
+
+\subsubsection{256-bit (AVX2)}
+
+\todo{Describe the 256-bit AVX2 implementation. Which intrinsics?
+(\texttt{\_mm256\_loadu\_ps}, \texttt{\_mm256\_set1\_ps},
+\texttt{\_mm256\_fmadd\_ps}, \texttt{\_mm256\_storeu\_ps}).
+How many floats per vector? (8). Any differences from SSE version
+besides width?}
+
+\subsubsection{512-bit (AVX-512)}
+
+AVX-512 is not available on the Intel Core Ultra 5 125U. Running \texttt{lscpu | grep avx512} returns no results, confirming the absence of AVX-512 support. Therefore, only 128-bit (SSE) and 256-bit (AVX2) SIMD implementations were tested.
+
+\subsection{Instruction Count for SIMD Implementations}
+
+\begin{table}[H]
+\centering
+\caption{Instruction counts: naive vs.\ SIMD (K=3)}
+\begin{tabular}{lrrr}
+\toprule
+Matrix Size & Naive & SSE 128-bit & AVX2 256-bit \\
+\midrule
+512x512     & \naiveInsnsKthreeFtwelve & \simdSSEKthreeFtwelveInsns & \simdAVXKthreeFtwelveInsns \\
+1024x1024   & \naiveInsnsKthreeTtwentyfour & \simdSSEKthreeTtwentyfourInsns & \simdAVXKthreeTtwentyfourInsns \\
+2048x2048   & \naiveInsnsKthreeTfortyeight & \simdSSEKthreeTfortyeightInsns & \simdAVXKthreeTfortyeightInsns \\
+4096x4096   & \naiveInsnsKthreeFninetysix & \simdSSEKthreeFninetysixInsns & \simdAVXKthreeFninetysixInsns \\
+8192x8192   & \naiveInsnsKthreeEonetwelve & \simdSSEKthreeEonetwelveInsns & \simdAVXKthreeEonetwelveInsns \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{Instruction counts: naive vs.\ SIMD (K=5)}
+\begin{tabular}{lrrr}
+\toprule
+Matrix Size & Naive & SSE 128-bit & AVX2 256-bit \\
+\midrule
+512x512     & \naiveInsnsKfiveFtwelve & \simdSSEKfiveFtwelveInsns & \simdAVXKfiveFtwelveInsns \\
+1024x1024   & \naiveInsnsKfiveTtwentyfour & \simdSSEKfiveTtwentyfourInsns & \simdAVXKfiveTtwentyfourInsns \\
+2048x2048   & \naiveInsnsKfiveTfortyeight & \simdSSEKfiveTfortyeightInsns & \simdAVXKfiveTfortyeightInsns \\
+4096x4096   & \naiveInsnsKfiveFninetysix & \simdSSEKfiveFninetysixInsns & \simdAVXKfiveFninetysixInsns \\
+8192x8192   & \naiveInsnsKfiveEonetwelve & \simdSSEKfiveEonetwelveInsns & \simdAVXKfiveEonetwelveInsns \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Speedup Results}
+
+\begin{table}[H]
+\centering
+\caption{SIMD speedups over naive (K=3)}
+\begin{tabular}{lrr}
+\toprule
+Matrix Size & SSE 128-bit & AVX2 256-bit \\
+\midrule
+512x512     & \simdSSEKthreeFtwelveSpeedup & \simdAVXKthreeFtwelveSpeedup \\
+1024x1024   & \simdSSEKthreeTtwentyfourSpeedup & \simdAVXKthreeTtwentyfourSpeedup \\
+2048x2048   & \simdSSEKthreeTfortyeightSpeedup & \simdAVXKthreeTfortyeightSpeedup \\
+4096x4096   & \simdSSEKthreeFninetysixSpeedup & \simdAVXKthreeFninetysixSpeedup \\
+8192x8192   & \simdSSEKthreeEonetwelveSpeedup & \simdAVXKthreeEonetwelveSpeedup \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{SIMD speedups over naive (K=5)}
+\begin{tabular}{lrr}
+\toprule
+Matrix Size & SSE 128-bit & AVX2 256-bit \\
+\midrule
+512x512     & \simdSSEKfiveFtwelveSpeedup & \simdAVXKfiveFtwelveSpeedup \\
+1024x1024   & \simdSSEKfiveTtwentyfourSpeedup & \simdAVXKfiveTtwentyfourSpeedup \\
+2048x2048   & \simdSSEKfiveTfortyeightSpeedup & \simdAVXKfiveTfortyeightSpeedup \\
+4096x4096   & \simdSSEKfiveFninetysixSpeedup & \simdAVXKfiveFninetysixSpeedup \\
+8192x8192   & \simdSSEKfiveEonetwelveSpeedup & \simdAVXKfiveEonetwelveSpeedup \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Plots}
+
+\begin{figure}[H]
+\centering
+\todo{Insert plot: Speedup vs.\ Matrix Size for different SIMD widths.
+Choose matrix sizes that allow you to clearly observe trends.}
+% \includegraphics[width=0.8\textwidth]{plots/simd_speedup_vs_size.png}
+\caption{SIMD speedup vs.\ Matrix Size for different SIMD widths}
+\end{figure}
+
+\subsection{Analysis Questions}
+
+\subsubsection{Q1: Change in Instruction Count from Naive to SIMD}
+
+\todo{Report the change in the number of instructions when moving from
+naive to the SIMD implementation. Justify your observations ---
+do instructions decrease? By how much? Is the reduction proportional
+to the SIMD width (4x for SSE, 8x for AVX2)? If not, why?
+(loop overhead, scalar remainder, setup instructions).}
+
+\subsubsection{Q2: Speedup Analysis}
+
+\todo{Did you achieve any speedup? If so, how much, and what contributed
+to it? (reduced instruction count, better throughput per cycle,
+FMA combining multiply+add). If not, what were the reasons?
+(memory bandwidth bottleneck, cache misses dominating).}
+
+\subsubsection{Q3: Choice of SIMD Intrinsics}
+
+\todo{Which SIMD intrinsics did you use? Justify your choice of functions.
+For example:
+\begin{itemize}
+    \item \texttt{\_mm256\_loadu\_ps}: unaligned load --- needed because
+          input offsets are not always 32-byte aligned.
+    \item \texttt{\_mm256\_set1\_ps}: broadcast kernel weight to all lanes.
+    \item \texttt{\_mm256\_fmadd\_ps}: fused multiply-add --- combines
+          multiply and add into a single instruction, reducing latency
+          and instruction count.
+    \item \texttt{\_mm256\_storeu\_ps}: unaligned store of result.
+\end{itemize}}
+
+% ============================================================================
+\section{Task 1D: Sabka Saath Sabka Vikaas (2 points)}
+% ============================================================================
+
+\subsection{Combined Optimized Implementation}
+
+\todo{Describe your combined implementation in \texttt{conv\_optimized.cpp}.
+Which techniques did you combine? (e.g.\ SIMD + tiling, SIMD +
+unrolling, SIMD + reordering, all of them). Explain how these
+techniques complement each other for synergistic gains --- i.e.\
+the combined benefit is greater than the sum of individual
+optimizations.}
+
+\subsection{Speedup Results}
+
+\begin{table}[H]
+\centering
+\caption{Combined optimized speedup over naive}
+\begin{tabular}{lrr}
+\toprule
+Matrix Size & K=3 Speedup & K=5 Speedup \\
+\midrule
+512x512     & \optimizedKthreeFtwelve & \optimizedKfiveFtwelve \\
+1024x1024   & \optimizedKthreeTtwentyfour & \optimizedKfiveTtwentyfour \\
+2048x2048   & \optimizedKthreeTfortyeight & \optimizedKfiveTfortyeight \\
+4096x4096   & \optimizedKthreeFninetysix & \optimizedKfiveFninetysix \\
+8192x8192   & \optimizedKthreeEonetwelve & \optimizedKfiveEonetwelve \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Final Performance Summary Plot}
+
+\begin{figure}[H]
+\centering
+\todo{Insert plot comparing the best performance achieved by each
+optimization technique across varying matrix sizes. The plot should
+include the following series (as in Figure 1.1 of the problem statement):
+\begin{itemize}
+    \item Loop unrolling (best variant)
+    \item Loop reordering (best variant)
+    \item Tiling (best tile size)
+    \item SIMD (best width)
+    \item Tiling + SIMD (combined)
+\end{itemize}
+Y-axis: normalized speedup (no optimization = 1.0).
+X-axis: matrix sizes.
+Create separate plots for K=3 and K=5 (or one combined).}
+% \includegraphics[width=0.85\textwidth]{plots/task1_speedup_vs_size.png}
+\caption{Comparison of all optimization techniques --- Speedup vs.\ Matrix Size}
+\end{figure}
+
+\todo{You can try different combinations and expand the plot accordingly
+(e.g.\ reordering + unrolling, tiling + unrolling, etc.).}
+
+\subsection{Analysis}
+
+\todo{Discuss how these techniques complement each other:
+\begin{itemize}
+    \item Why does combining techniques yield more than the sum of parts?
+    \item Which combination gave the best speedup?
+    \item What is the bottleneck of your best implementation?
+          (compute-bound? memory-bound? Roofline analysis?)
+    \item How does the gain/loss of each technique vary with matrix size
+          and kernel size?
+\end{itemize}}
+
+% ============================================================================
+% END
+% ============================================================================
+
+\end{document}
