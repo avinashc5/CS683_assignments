@@ -124,7 +124,7 @@ static double run_config(int H, int W, int K, unsigned seed, const char* only,
             if (ok) ++correct_scored; else ++incorrect_scored;
         }
 
-        const double ms = pa1::time_mean_ms(run, kWarmup, kReps);
+        const double ms = pa1::time_median_ms(run, kWarmup, kReps);
         const double gflops = flops / (ms * 1e6);  // ms->s and FLOP->GFLOP
         if (is_naive) naive_ms = ms;
         const double speedup = (ms > 0.0) ? naive_ms / ms : 0.0;
