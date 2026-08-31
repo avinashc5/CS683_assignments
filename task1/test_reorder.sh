@@ -6,6 +6,7 @@ cd "$(dirname "$0")"
 SIZES=(512 1024 2048 4096 8192)
 KERNELS=(3 5)
 OUT=reorder_results.txt
+PIN="${PIN:-taskset -c 3}"
 
 echo "Running reorder benchmarks..."
 echo ""
@@ -23,7 +24,7 @@ for K in "${KERNELS[@]}"; do
     for SIZE in "${SIZES[@]}"; do
         echo "  K=$K  size=${SIZE}x${SIZE}"
 
-        output=$(./bin/conv reorder "$SIZE" "$SIZE" "$K" 2>&1)
+        output=$($PIN ./bin/conv reorder "$SIZE" "$SIZE" "$K" 2>&1)
 
         naive_ms=$(echo "$output" | grep "naive (ref)" | awk '{print $4}')
         naive_gf=$(echo "$output" | grep "naive (ref)" | awk '{print $5}')

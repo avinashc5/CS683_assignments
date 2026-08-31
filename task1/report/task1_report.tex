@@ -29,13 +29,24 @@
 % ============================================================================
 
 \begin{itemize}
-    \item \textbf{CPU:} Intel Core Ultra 5 125U (12 cores / 14 threads, 2P+8E+2LPE, max 4.3 GHz)
-    \item \textbf{L1-D Cache:} 352 KiB total (10 instances), 64-byte lines, 8-way set associative
-    \item \textbf{L2 Cache:} 10 MiB (5 instances)
-    \item \textbf{L3 Cache:} 12 MiB (1 instance)
+    \item \textbf{CPU:} Intel Core i5-11400H (Tiger Lake-H), 6 cores / 6 threads
+          (SMT disabled), all identical P-cores, base 2.70 GHz, max 4.50 GHz
+    \item \textbf{L1-D Cache:} 48 KiB per core (288 KiB total, 6 instances),
+          64-byte lines, 12-way set associative
+    \item \textbf{L2 Cache:} 1.25 MiB per core (7.5 MiB total, 6 instances), 20-way
+    \item \textbf{L3 Cache:} 12 MiB (1 instance, shared), 8-way
+    \item \textbf{Vector ISA:} AVX2 + FMA and AVX-512
+          (\texttt{avx512f}, \texttt{avx512dq}, \texttt{avx512bw}, \texttt{avx512vl},
+          \texttt{avx512\_vnni})
     \item \textbf{Compiler flags:} \texttt{-std=c++17 -O2 -fno-tree-vectorize -mavx2 -mfma}
-    \item \textbf{OS:} Ubuntu Linux, kernel 7.0.0-30-generic (x86\_64)
-    \item \textbf{Pinning:} \texttt{taskset -c 0} (pinned to P-core 0 for consistent results on hybrid CPU)
+          (the AVX-512 variant additionally uses \texttt{-mavx512f})
+    \item \textbf{OS:} Ubuntu 24.04.4 LTS, kernel 6.8.0-138-generic (x86\_64)
+    \item \textbf{Pinning:} \texttt{taskset -c 3}. This CPU is not hybrid, so every core
+          is equivalent; a single fixed core is used so all measurements share one
+          cache and frequency context.
+    \item \textbf{Frequency governor:} \texttt{performance}, with
+          \texttt{kernel.perf\_event\_paranoid = -1} so \texttt{perf} can read the
+          hardware counters used for the instruction-count and MPKI tables.
 \end{itemize}
 
 % ============================================================================
@@ -359,7 +370,17 @@ besides width?}
 
 \subsubsection{512-bit (AVX-512)}
 
-AVX-512 is not available on the Intel Core Ultra 5 125U. Running \texttt{lscpu | grep avx512} returns no results, confirming the absence of AVX-512 support. Therefore, only 128-bit (SSE) and 256-bit (AVX2) SIMD implementations were tested.
+AVX-512 \emph{is} available on the i5-11400H (\texttt{lscpu | grep avx512} reports
+\texttt{avx512f}, \texttt{avx512dq}, \texttt{avx512bw} and \texttt{avx512vl}), so all
+three widths --- 128-bit SSE, 256-bit AVX2 and 512-bit AVX-512 --- were measured. The
+512-bit variant processes 16 floats per vector and is compiled with \texttt{-mavx512f};
+the scalar optimisation level is unchanged from the pinned project flags so that only
+the vector width differs between variants.
+
+% [TODO: Discuss the 512-bit results. Note that the speedup is strongly size-dependent:
+%  at K=3 AVX-512 reaches 12.32x at 512x512 but falls to 5.03x at 8192x8192, while at
+%  K=5 it holds 11.5-12.6x across every size. Explain why (working set vs cache, and
+%  the AVX-512 frequency/licence behaviour on this part).]
 
 \subsection{Instruction Count for SIMD Implementations}
 

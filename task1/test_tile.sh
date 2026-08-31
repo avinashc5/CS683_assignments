@@ -25,7 +25,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
 fi
 
 # Pin to P-core 0 for consistent perf counter access on hybrid CPUs
-PIN="taskset -c 0"
+PIN="${PIN:-taskset -c 3}"
 
 # Check if perf is available for MPKI
 HAS_PERF=0

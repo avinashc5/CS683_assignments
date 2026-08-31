@@ -24,7 +24,7 @@ if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
     usage
 fi
 
-PIN="taskset -c 0"
+PIN="${PIN:-taskset -c 3}"
 
 # Check if perf is available for instruction count
 HAS_PERF=0

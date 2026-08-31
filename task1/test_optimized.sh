@@ -7,7 +7,7 @@ SIZES=(512 1024 2048 4096 8192)
 KERNELS=(3 5)
 OUT=optimized_results.txt
 
-PIN="taskset -c 0"
+PIN="${PIN:-taskset -c 3}"
 
 echo "Running optimized benchmarks..."
 echo ""

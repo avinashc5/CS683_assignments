@@ -9,6 +9,7 @@ ALL_STRATEGIES=(1 2 3 4 5 6 7 8)
 ALL_STRAT_NAMES=("unroll_ox" "unroll_kx" "unroll_ky" "unroll_ox_oy" "reord_unroll_ox" "reord_unroll_oy" "reord_unroll_ox_oy" "reord_unroll_kx")
 SRC=src/conv_unroll.cpp
 OUT=unroll_results.txt
+PIN="${PIN:-taskset -c 3}"
 
 usage() {
     echo "Usage: $0 [strategy]"
@@ -62,7 +63,7 @@ for K in "${KERNELS[@]}"; do
         for SIZE in "${SIZES[@]}"; do
             echo "  K=$K  strategy=$name  size=${SIZE}x${SIZE}"
 
-            output=$(./bin/conv unroll "$SIZE" "$SIZE" "$K" 2>&1)
+            output=$($PIN ./bin/conv unroll "$SIZE" "$SIZE" "$K" 2>&1)
 
             # Fields: name correct time(ms) GFLOP/s speedup
             naive_ms=$(echo "$output" | grep "naive (ref)" | awk '{print $4}')
