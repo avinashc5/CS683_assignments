@@ -287,19 +287,28 @@ Justify in terms of cache efficiency and execution time.}
 
 \begin{figure}[H]
 \centering
-\todo{Insert plot: L1-D MPKI vs.\ Matrix Size for different tile sizes.
-Include naive as baseline. One plot per K value (or combined).}
-% \includegraphics[width=0.8\textwidth]{plots/tile_mpki_vs_size.png}
-\caption{L1-D MPKI vs.\ Matrix Size for different tile sizes}
+\includegraphics[width=0.8\textwidth]{../plots/tile_mpki_K3.png}
+\caption{L1-D MPKI vs.\ Matrix Size for different tile sizes (K=3)}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{../plots/tile_mpki_K5.png}
+\caption{L1-D MPKI vs.\ Matrix Size for different tile sizes (K=5)}
 \end{figure}
 
 \subsubsection{Speedup vs.\ Matrix Size}
 
 \begin{figure}[H]
 \centering
-\todo{Insert plot: Speedup vs.\ Matrix Size for different tile sizes.}
-% \includegraphics[width=0.8\textwidth]{plots/tile_speedup_vs_size.png}
-\caption{Speedup vs.\ Matrix Size for different tile sizes}
+\includegraphics[width=0.8\textwidth]{../plots/tile_speedup_K3.png}
+\caption{Speedup vs.\ Matrix Size for different tile sizes (K=3)}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{../plots/tile_speedup_K5.png}
+\caption{Speedup vs.\ Matrix Size for different tile sizes (K=5)}
 \end{figure}
 
 \subsection{Analysis Questions}
@@ -354,19 +363,11 @@ Matrix Size & K=3 Instructions & K=5 Instructions \\
 
 \subsubsection{128-bit (SSE)}
 
-\todo{Describe the 128-bit SSE implementation. Which intrinsics did you use?
-(e.g.\ \texttt{\_mm\_loadu\_ps}, \texttt{\_mm\_set1\_ps},
-\texttt{\_mm\_fmadd\_ps}, \texttt{\_mm\_storeu\_ps}).
-How many floats per vector? (4). Explain the vectorization strategy
---- which loop is vectorized (ox) and how.}
+The 128-bit SSE implementation vectorizes the inner \texttt{ox} loop, processing 4 output pixels per iteration. The loop order is kept as the naive \texttt{oy, ox, ky, kx}. For each group of 4 output columns, a single \texttt{\_\_m128} accumulator is initialized to zero with \texttt{\_mm\_setzero\_ps()}. The kernel is then iterated over all $K \times K$ positions: at each position, the kernel weight is broadcast to all 4 lanes using \texttt{\_mm\_set1\_ps(ker[ky*K + kx])}, the 4 corresponding input values are loaded with \texttt{\_mm\_loadu\_ps(in\_row + kx)} (unaligned load, since input offsets are not guaranteed to be 16-byte aligned), and a fused multiply-add \texttt{\_mm\_fmadd\_ps(v, w, acc)} accumulates the products. After the full kernel has been applied, the result is written back with \texttt{\_mm\_storeu\_ps()}. A scalar tail loop handles the remaining $W \bmod 4$ columns per row.
 
 \subsubsection{256-bit (AVX2)}
 
-\todo{Describe the 256-bit AVX2 implementation. Which intrinsics?
-(\texttt{\_mm256\_loadu\_ps}, \texttt{\_mm256\_set1\_ps},
-\texttt{\_mm256\_fmadd\_ps}, \texttt{\_mm256\_storeu\_ps}).
-How many floats per vector? (8). Any differences from SSE version
-besides width?}
+The 256-bit AVX2 implementation follows the same structure as SSE but processes 8 output pixels per iteration using 256-bit registers. The intrinsics used are the \texttt{\_mm256\_*} equivalents: \texttt{\_mm256\_setzero\_ps()} for initialization, \texttt{\_mm256\_set1\_ps()} for kernel weight broadcast, \texttt{\_mm256\_loadu\_ps()} for unaligned 8-float loads, \texttt{\_mm256\_fmadd\_ps()} for fused multiply-add, and \texttt{\_mm256\_storeu\_ps()} for the final store. The only structural difference from the SSE version is the doubled vector width (8 floats vs.\ 4), which halves the number of vector iterations over the output columns. A scalar tail loop handles the remaining $W \bmod 8$ columns.
 
 \subsubsection{512-bit (AVX-512)}
 
@@ -454,10 +455,14 @@ Matrix Size & SSE 128-bit & AVX2 256-bit \\
 
 \begin{figure}[H]
 \centering
-\todo{Insert plot: Speedup vs.\ Matrix Size for different SIMD widths.
-Choose matrix sizes that allow you to clearly observe trends.}
-% \includegraphics[width=0.8\textwidth]{plots/simd_speedup_vs_size.png}
-\caption{SIMD speedup vs.\ Matrix Size for different SIMD widths}
+\includegraphics[width=0.8\textwidth]{../plots/simd_speedup_K3.png}
+\caption{SIMD speedup vs.\ Matrix Size (K=3)}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{../plots/simd_speedup_K5.png}
+\caption{SIMD speedup vs.\ Matrix Size (K=5)}
 \end{figure}
 
 \subsection{Analysis Questions}
@@ -526,25 +531,15 @@ Matrix Size & K=3 Speedup & K=5 Speedup \\
 
 \begin{figure}[H]
 \centering
-\todo{Insert plot comparing the best performance achieved by each
-optimization technique across varying matrix sizes. The plot should
-include the following series (as in Figure 1.1 of the problem statement):
-\begin{itemize}
-    \item Loop unrolling (best variant)
-    \item Loop reordering (best variant)
-    \item Tiling (best tile size)
-    \item SIMD (best width)
-    \item Tiling + SIMD (combined)
-\end{itemize}
-Y-axis: normalized speedup (no optimization = 1.0).
-X-axis: matrix sizes.
-Create separate plots for K=3 and K=5 (or one combined).}
-% \includegraphics[width=0.85\textwidth]{plots/task1_speedup_vs_size.png}
-\caption{Comparison of all optimization techniques --- Speedup vs.\ Matrix Size}
+\includegraphics[width=0.8\textwidth]{../plots/final_comparison_K3.png}
+\caption{Comparison of all optimization techniques --- Speedup vs.\ Matrix Size (K=3)}
 \end{figure}
 
-\todo{You can try different combinations and expand the plot accordingly
-(e.g.\ reordering + unrolling, tiling + unrolling, etc.).}
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{../plots/final_comparison_K5.png}
+\caption{Comparison of all optimization techniques --- Speedup vs.\ Matrix Size (K=5)}
+\end{figure}
 
 \subsection{Analysis}
 
