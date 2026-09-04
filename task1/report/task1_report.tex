@@ -56,9 +56,15 @@
 \subsection{Motivation}
 % Q1: What motivated you to make changes to your code?
 
-\todo{Explain what motivated the loop reordering and unrolling optimizations.
-Consider: reducing loop overhead, improving ILP, enabling out-of-order
-execution, improving spatial/temporal locality via reordering.}
+Loop reordering changes which data is reused in the innermost loops and therefore which data stays in cache.
+If a working set fits in cache, it should be consumed while it is still there rather than being evicted and re-fetched.
+Conversely, data that does not fit should be traversed in the outermost loop so that it is touched only once per pass.
+By choosing different loop orders we can shift temporal reuse between the kernel, the input, and the output, and the best choice depends on which of these is small enough to stay cache-resident.
+
+Unrolling does not change the access order or the total number of arithmetic operations.
+Its primary effect is exposing instruction-level parallelism: a single accumulator forces every multiply-add into a serial dependency chain, leaving the execution units idle while each result is produced.
+Multiple independent accumulators give the out-of-order core independent chains that can execute in parallel, improving utilization of the FMA pipeline.
+A secondary benefit is reducing loop-control overhead (fewer branches and counter increments per useful operation).
 
 \subsection{Implementation Details}
 % Q2: What considerations did you take into account when implementing those changes?
@@ -173,16 +179,45 @@ Unroll ox+oy  & \unrollUnrollOxOyKfiveFtwelve & \unrollUnrollOxOyKfiveTtwentyfou
 
 \subsection{Effectiveness Metric}
 
-\todo{Which metric did you use to quantify effectiveness and why?
-(e.g.\ speedup = naive\_time / optimized\_time, GFlop/s). Justify
-the choice. Discuss how speedup varies with matrix size and kernel
-size.}
+We use \textbf{speedup} $= t_{\text{naive}} / t_{\text{optimized}}$ as the effectiveness metric.
+A speedup of $1.0\times$ means no change; values above $1.0\times$ indicate improvement and values below indicate a slowdown.
+
+Speedup is preferred over absolute execution time because it normalises away the effect of problem size, letting us compare the benefit of a technique at $512\times512$ directly against its benefit at $8192\times8192$.
+An alternative metric is GFlop/s $= 2 H W K^{2} / t$, which measures absolute throughput.
+However, because both the naive and optimised versions perform the same number of floating-point operations, the ratio of their GFlop/s values is algebraically equal to the time-based speedup:
+\[
+\frac{\text{GFlop/s}_{\text{opt}}}{\text{GFlop/s}_{\text{naive}}}
+= \frac{\text{flops} / t_{\text{opt}}}{\text{flops} / t_{\text{naive}}}
+= \frac{t_{\text{naive}}}{t_{\text{opt}}}
+= \text{speedup}.
+\]
+We verified this identity across every configuration in our results; the two metrics agree to rounding precision.
+Speedup is therefore sufficient and simpler to interpret.
 
 \subsection{Analysis}
 
-\todo{Discuss: Which unrolling strategy works best and why? Does reordering
-help? How does the benefit change with matrix size (cache effects)?
-Which combination gives the best result?}
+\textbf{Best strategy: unroll ox (naive order).}
+Unrolling the output-column loop with 4 independent accumulators consistently delivers the highest speedup: approximately $3.0\text{--}3.2\times$ for $K{=}3$ and $2.6\times$ for $K{=}5$ across all matrix sizes.
+The gain comes from breaking the FMA dependency chain --- with a single accumulator the $K^{2}$ multiply-adds are serial (FMA latency ${\sim}4$ cycles, throughput 2/cycle), but 4 independent accumulators let the out-of-order core pipeline them.
+The 2D block strategy (unroll ox+oy) is close behind (${\sim}2.6\text{--}2.85\times$) for the same reason: it also produces independent accumulator chains along the ox dimension.
+
+\textbf{Unrolling kx and ky hurts for small K.}
+For $K{=}3$, unroll kx ($0.61\text{--}0.65\times$) and unroll ky ($0.84\text{--}0.88\times$) cause slowdowns.
+With an unroll factor of 4 and $K{=}3$, the main unrolled body executes $\lfloor 3/4 \rfloor = 0$ iterations, so all work falls into the scalar tail loop while still paying the setup overhead.
+For $K{=}5$ this reverses: unroll kx improves to ${\sim}1.1\times$ (one full unrolled iteration covers 4 of 5 positions) and unroll ky is neutral (${\sim}1.0\times$).
+
+\textbf{Reordering helps only at small sizes.}
+The reordered loop order (\texttt{ky, kx, oy, ox}) gives $1.37\times$ at $512{\times}512$ ($K{=}3$) but degrades to $0.55\times$ at $4096{\times}4096$.
+The reason is that reordering makes $K^{2}$ full passes over the entire output image; once the image exceeds L3 capacity, each pass re-fetches data from DRAM.
+The naive order, by contrast, touches only $K$ input rows per output row, which stays cache-resident even at large sizes.
+
+\textbf{Reordered + unrolled combinations inherit this penalty.}
+All reordered variants collapse at large sizes for the same multi-pass reason.
+The one partial exception is reorder + unroll kx at $K{=}5$ ($2.36\times$ at $512{\times}512$, $1.26\times$ at $8192{\times}8192$): unrolling kx by 4 covers most of $K{=}5$ and amortises the per-pixel read-modify-write cost of the reordered accumulation.
+
+\textbf{Size dependence is driven by reordering, not unrolling.}
+The naive-order unroll strategies (ox, ox+oy) are remarkably stable across matrix sizes because their bottleneck is ILP, not cache capacity.
+The reordered variants, however, are cache-sensitive and degrade as the working set grows beyond the cache hierarchy.
 
 % ============================================================================
 \section{Task 1B: Tiling (1 point)}
@@ -214,13 +249,19 @@ Matrix Size & K=3 MPKI & K=5 MPKI \\
 
 \subsection{Implementing Tiled 2D Convolution}
 
-\todo{Describe your tiling approach. What dimension(s) did you tile?
-(e.g.\ horizontal strips of height \texttt{TILE\_H}).
-Explain the algorithm: zero the output strip, then iterate over
-K$\times$K kernel elements, accumulating into the strip.}
+We tile along the output rows only, dividing the output into horizontal strips of height \texttt{TILE\_H}.
+For each strip the algorithm is:
+\begin{enumerate}
+    \item Zero the output strip (\texttt{TILE\_H} $\times$ $W$ elements).
+    \item Iterate in kernel-major order (\texttt{ky, kx} as the outer loops). For each kernel position, sweep over every pixel in the strip and accumulate \texttt{ker[ky*K+kx] * input} into the corresponding output element.
+    \item The last strip is clamped: if $H$ is not a multiple of \texttt{TILE\_H}, the remaining rows form a shorter strip.
+\end{enumerate}
+Only the row dimension is tiled because columns are already contiguous in memory --- tiling along columns would break the sequential access pattern that gives good spatial locality.
 
-\todo{Explain the rationale: why does tiling help? (keeping the output strip
-in L1 cache across K$\times$K passes reduces capacity misses).}
+The tiling uses the reordered loop order (\texttt{ky, kx, oy, ox}), which makes $K^{2}$ passes over the output.
+Without tiling, those $K^{2}$ passes touch the entire $H \times W$ output, which exceeds L1 capacity at large matrix sizes and causes repeated eviction and re-fetch.
+With tiling, each pass is restricted to a \texttt{TILE\_H} $\times$ $W$ strip.
+If that strip fits in L1, the $K^{2}$ re-accesses hit cache instead of going to L2 or DRAM, converting capacity misses into cache hits.
 
 \subsection{Experimenting with Tile Sizes}
 
@@ -278,8 +319,16 @@ Matrix Size & 8 & 16 & 32 & 64 & 128 & 256 \\
 
 \subsubsection{Best Tile Size}
 
-\todo{Identify which tile size gives the best performance on your hardware.
-Justify in terms of cache efficiency and execution time.}
+Tile heights of 8--32 give the most consistent speedup across all matrix sizes and both kernel sizes.
+For $K{=}3$, \texttt{TILE\_H}=16 is the best overall: it delivers $1.29\text{--}1.40\times$ at every size, while \texttt{TILE\_H}=8 is nearly as good ($1.23\text{--}1.38\times$).
+For $K{=}5$, \texttt{TILE\_H}=16 and 32 are tied at ${\sim}1.27\text{--}1.32\times$.
+
+Larger tile heights (128, 256) perform well at small matrices but collapse at large ones: \texttt{TILE\_H}=256 drops to $0.63\times$ at $8192{\times}8192$ ($K{=}3$) and $0.84\times$ ($K{=}5$).
+The reason is that the output strip size is $\texttt{TILE\_H} \times W \times 4$ bytes.
+At $W{=}8192$, a strip of height 256 is $256 \times 8192 \times 4 = 8$\,MiB --- far larger than the 48\,KiB L1-D or even the 1.25\,MiB L2, so the $K^{2}$ passes evict and re-fetch just as they would without tiling.
+A strip of height 16 at the same width is $16 \times 8192 \times 4 = 512$\,KiB, which exceeds L1 but fits comfortably in L2, so the repeated passes still hit cache rather than going to DRAM.
+
+Small tile heights (8--32) thus provide the best trade-off: the strip is small enough to stay in L2 even at the largest matrix sizes, while not so small that the per-strip overhead (zeroing, extra loop control) dominates.
 
 \subsection{Plots}
 
@@ -315,25 +364,42 @@ Justify in terms of cache efficiency and execution time.}
 
 \subsubsection{Q1: Changes in L1-D MPKI from Naive to Tiled}
 
-\todo{Report the changes in L1-D MPKI observed when moving from naive to
-tiled 2D convolution. Justify your observations --- why does tiling
-reduce (or not reduce) cache misses? Relate to the working set
-fitting in L1.}
+Tiling \emph{increases} L1-D MPKI rather than reducing it.
+The naive convolution has MPKI of ${\sim}1.8\text{--}3.1$ (K=3) and ${\sim}0.9\text{--}2.1$ (K=5), while all tiled variants jump to ${\sim}8.0\text{--}9.1$ regardless of tile size --- roughly a $4\text{--}5\times$ increase.
+
+This happens because the naive loop order (\texttt{oy, ox, ky, kx}) already has excellent L1 locality: it computes one output pixel at a time, touching only $K$ input rows per output row, which is a small working set that fits comfortably in L1.
+Tiling, however, uses the reordered loop order (\texttt{ky, kx, oy, ox}), which makes $K^{2}$ passes over the output strip.
+Even with small tile heights, the strip (\texttt{TILE\_H} $\times$ $W$ $\times$ 4 bytes) is too large for the 48\,KiB L1-D at any benchmarked width, so every pass through the strip incurs L1 misses.
+
+Despite the higher L1 MPKI, tiling still achieves a speedup (see Q3) because those L1 misses are served by L2, not DRAM.
+The strip fits in L2 (1.25\,MiB) for small tile heights, so the $K^{2}$ re-accesses hit L2 (${\sim}10$ cycle latency) instead of going to main memory (${\sim}100{+}$ cycles).
 
 \subsubsection{Q2: How L1-D MPKI Varies Across Matrix Sizes and Tile Sizes}
 
-\todo{Explain your findings in terms of the cache hierarchy and working set
-sizes. For example: for small matrices, the entire output may fit in
-cache even without tiling; for large matrices, smaller tiles keep the
-strip in L1. Discuss the sweet spot.}
+The tiled MPKI is remarkably flat across both matrix sizes and tile sizes, staying in the ${\sim}8.0\text{--}9.2$ range.
+This is because, at every benchmarked width ($W \geq 512$), even the smallest strip (\texttt{TILE\_H}=8, $W{=}512$: $8 \times 512 \times 4 = 16$\,KiB) is a significant fraction of L1 (48\,KiB), and the reordered loop makes $K^{2}$ passes that cycle through it repeatedly.
+Once the strip exceeds L1 capacity, further increases in strip size (larger \texttt{TILE\_H} or larger $W$) do not change the L1 miss rate much --- L1 is already fully cycling.
+
+The naive MPKI, by contrast, does vary with matrix size: it rises from ${\sim}1.8$ at $512{\times}512$ to ${\sim}3.1$ at $4096{\times}4096$ for $K{=}3$.
+This is because the naive order accesses $K$ input rows per output row; as $W$ grows, these $K$ rows become wider and start competing for L1 space, gradually increasing the miss rate.
 
 \subsubsection{Q3: Speedup Analysis}
 
-\todo{Did you achieve a speedup? If yes, quantify the improvement and
-identify the contributing factors (reduced cache misses, better
-spatial locality). If not, analyze the limiting factors (e.g.\
-overhead of zeroing, extra loop control) and propose possible
-solutions.}
+Tiling achieves a consistent $1.2\text{--}1.4\times$ speedup for tile heights 8--32 across all matrix sizes, despite the higher L1-D MPKI.
+The speedup comes from two sources:
+\begin{enumerate}
+    \item \textbf{L2 cache hits instead of DRAM accesses.}
+    Without tiling, the reordered loop order would make $K^{2}$ passes over the entire $H \times W$ output, which exceeds L2 at large sizes and goes to DRAM.
+    Tiling restricts each set of $K^{2}$ passes to a strip that fits in L2, converting DRAM accesses into L2 hits.
+
+    \item \textbf{Kernel weight amortisation.}
+    The reordered order loads each kernel weight once and reuses it across all pixels in the strip, reducing the total number of loads compared to the naive order where the weight is re-loaded for every output pixel.
+\end{enumerate}
+
+The speedup is limited by two factors.
+First, the strip does not fit in L1, so every pass through it incurs L1 misses (served by L2, but still slower than L1 hits).
+Second, the reordered order requires the output to be zeroed first and then accumulated with read-modify-write operations, adding overhead that the naive order avoids (it writes each output pixel exactly once).
+For large tile heights (128, 256) at large matrix sizes, the strip exceeds even L2 and the speedup disappears --- \texttt{TILE\_H}=256 at $8192{\times}8192$ is $0.63\times$ for $K{=}3$, a net slowdown.
 
 % ============================================================================
 \section{Task 1C: SIMD (2 points)}
@@ -388,15 +454,15 @@ the vector width differs between variants.
 \begin{table}[H]
 \centering
 \caption{Instruction counts: naive vs.\ SIMD (K=3)}
-\begin{tabular}{lrrr}
+\begin{tabular}{lrrrr}
 \toprule
-Matrix Size & Naive & SSE 128-bit & AVX2 256-bit \\
+Matrix Size & Naive & SSE 128-bit & AVX2 256-bit & AVX-512 512-bit \\
 \midrule
-512x512     & \naiveInsnsKthreeFtwelve & \simdSSEKthreeFtwelveInsns & \simdAVXKthreeFtwelveInsns \\
-1024x1024   & \naiveInsnsKthreeTtwentyfour & \simdSSEKthreeTtwentyfourInsns & \simdAVXKthreeTtwentyfourInsns \\
-2048x2048   & \naiveInsnsKthreeTfortyeight & \simdSSEKthreeTfortyeightInsns & \simdAVXKthreeTfortyeightInsns \\
-4096x4096   & \naiveInsnsKthreeFninetysix & \simdSSEKthreeFninetysixInsns & \simdAVXKthreeFninetysixInsns \\
-8192x8192   & \naiveInsnsKthreeEonetwelve & \simdSSEKthreeEonetwelveInsns & \simdAVXKthreeEonetwelveInsns \\
+512x512     & \naiveInsnsKthreeFtwelve & \simdSSEKthreeFtwelveInsns & \simdAVXKthreeFtwelveInsns & \simdAVXFiveTwelveKthreeFtwelveInsns \\
+1024x1024   & \naiveInsnsKthreeTtwentyfour & \simdSSEKthreeTtwentyfourInsns & \simdAVXKthreeTtwentyfourInsns & \simdAVXFiveTwelveKthreeTtwentyfourInsns \\
+2048x2048   & \naiveInsnsKthreeTfortyeight & \simdSSEKthreeTfortyeightInsns & \simdAVXKthreeTfortyeightInsns & \simdAVXFiveTwelveKthreeTfortyeightInsns \\
+4096x4096   & \naiveInsnsKthreeFninetysix & \simdSSEKthreeFninetysixInsns & \simdAVXKthreeFninetysixInsns & \simdAVXFiveTwelveKthreeFninetysixInsns \\
+8192x8192   & \naiveInsnsKthreeEonetwelve & \simdSSEKthreeEonetwelveInsns & \simdAVXKthreeEonetwelveInsns & \simdAVXFiveTwelveKthreeEonetwelveInsns \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -404,15 +470,15 @@ Matrix Size & Naive & SSE 128-bit & AVX2 256-bit \\
 \begin{table}[H]
 \centering
 \caption{Instruction counts: naive vs.\ SIMD (K=5)}
-\begin{tabular}{lrrr}
+\begin{tabular}{lrrrr}
 \toprule
-Matrix Size & Naive & SSE 128-bit & AVX2 256-bit \\
+Matrix Size & Naive & SSE 128-bit & AVX2 256-bit & AVX-512 512-bit \\
 \midrule
-512x512     & \naiveInsnsKfiveFtwelve & \simdSSEKfiveFtwelveInsns & \simdAVXKfiveFtwelveInsns \\
-1024x1024   & \naiveInsnsKfiveTtwentyfour & \simdSSEKfiveTtwentyfourInsns & \simdAVXKfiveTtwentyfourInsns \\
-2048x2048   & \naiveInsnsKfiveTfortyeight & \simdSSEKfiveTfortyeightInsns & \simdAVXKfiveTfortyeightInsns \\
-4096x4096   & \naiveInsnsKfiveFninetysix & \simdSSEKfiveFninetysixInsns & \simdAVXKfiveFninetysixInsns \\
-8192x8192   & \naiveInsnsKfiveEonetwelve & \simdSSEKfiveEonetwelveInsns & \simdAVXKfiveEonetwelveInsns \\
+512x512     & \naiveInsnsKfiveFtwelve & \simdSSEKfiveFtwelveInsns & \simdAVXKfiveFtwelveInsns & \simdAVXFiveTwelveKfiveFtwelveInsns \\
+1024x1024   & \naiveInsnsKfiveTtwentyfour & \simdSSEKfiveTtwentyfourInsns & \simdAVXKfiveTtwentyfourInsns & \simdAVXFiveTwelveKfiveTtwentyfourInsns \\
+2048x2048   & \naiveInsnsKfiveTfortyeight & \simdSSEKfiveTfortyeightInsns & \simdAVXKfiveTfortyeightInsns & \simdAVXFiveTwelveKfiveTfortyeightInsns \\
+4096x4096   & \naiveInsnsKfiveFninetysix & \simdSSEKfiveFninetysixInsns & \simdAVXKfiveFninetysixInsns & \simdAVXFiveTwelveKfiveFninetysixInsns \\
+8192x8192   & \naiveInsnsKfiveEonetwelve & \simdSSEKfiveEonetwelveInsns & \simdAVXKfiveEonetwelveInsns & \simdAVXFiveTwelveKfiveEonetwelveInsns \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -422,15 +488,15 @@ Matrix Size & Naive & SSE 128-bit & AVX2 256-bit \\
 \begin{table}[H]
 \centering
 \caption{SIMD speedups over naive (K=3)}
-\begin{tabular}{lrr}
+\begin{tabular}{lrrr}
 \toprule
-Matrix Size & SSE 128-bit & AVX2 256-bit \\
+Matrix Size & SSE 128-bit & AVX2 256-bit & AVX-512 512-bit \\
 \midrule
-512x512     & \simdSSEKthreeFtwelveSpeedup & \simdAVXKthreeFtwelveSpeedup \\
-1024x1024   & \simdSSEKthreeTtwentyfourSpeedup & \simdAVXKthreeTtwentyfourSpeedup \\
-2048x2048   & \simdSSEKthreeTfortyeightSpeedup & \simdAVXKthreeTfortyeightSpeedup \\
-4096x4096   & \simdSSEKthreeFninetysixSpeedup & \simdAVXKthreeFninetysixSpeedup \\
-8192x8192   & \simdSSEKthreeEonetwelveSpeedup & \simdAVXKthreeEonetwelveSpeedup \\
+512x512     & \simdSSEKthreeFtwelveSpeedup & \simdAVXKthreeFtwelveSpeedup & \simdAVXFiveTwelveKthreeFtwelveSpeedup \\
+1024x1024   & \simdSSEKthreeTtwentyfourSpeedup & \simdAVXKthreeTtwentyfourSpeedup & \simdAVXFiveTwelveKthreeTtwentyfourSpeedup \\
+2048x2048   & \simdSSEKthreeTfortyeightSpeedup & \simdAVXKthreeTfortyeightSpeedup & \simdAVXFiveTwelveKthreeTfortyeightSpeedup \\
+4096x4096   & \simdSSEKthreeFninetysixSpeedup & \simdAVXKthreeFninetysixSpeedup & \simdAVXFiveTwelveKthreeFninetysixSpeedup \\
+8192x8192   & \simdSSEKthreeEonetwelveSpeedup & \simdAVXKthreeEonetwelveSpeedup & \simdAVXFiveTwelveKthreeEonetwelveSpeedup \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -438,15 +504,15 @@ Matrix Size & SSE 128-bit & AVX2 256-bit \\
 \begin{table}[H]
 \centering
 \caption{SIMD speedups over naive (K=5)}
-\begin{tabular}{lrr}
+\begin{tabular}{lrrr}
 \toprule
-Matrix Size & SSE 128-bit & AVX2 256-bit \\
+Matrix Size & SSE 128-bit & AVX2 256-bit & AVX-512 512-bit \\
 \midrule
-512x512     & \simdSSEKfiveFtwelveSpeedup & \simdAVXKfiveFtwelveSpeedup \\
-1024x1024   & \simdSSEKfiveTtwentyfourSpeedup & \simdAVXKfiveTtwentyfourSpeedup \\
-2048x2048   & \simdSSEKfiveTfortyeightSpeedup & \simdAVXKfiveTfortyeightSpeedup \\
-4096x4096   & \simdSSEKfiveFninetysixSpeedup & \simdAVXKfiveFninetysixSpeedup \\
-8192x8192   & \simdSSEKfiveEonetwelveSpeedup & \simdAVXKfiveEonetwelveSpeedup \\
+512x512     & \simdSSEKfiveFtwelveSpeedup & \simdAVXKfiveFtwelveSpeedup & \simdAVXFiveTwelveKfiveFtwelveSpeedup \\
+1024x1024   & \simdSSEKfiveTtwentyfourSpeedup & \simdAVXKfiveTtwentyfourSpeedup & \simdAVXFiveTwelveKfiveTtwentyfourSpeedup \\
+2048x2048   & \simdSSEKfiveTfortyeightSpeedup & \simdAVXKfiveTfortyeightSpeedup & \simdAVXFiveTwelveKfiveTfortyeightSpeedup \\
+4096x4096   & \simdSSEKfiveFninetysixSpeedup & \simdAVXKfiveFninetysixSpeedup & \simdAVXFiveTwelveKfiveFninetysixSpeedup \\
+8192x8192   & \simdSSEKfiveEonetwelveSpeedup & \simdAVXKfiveEonetwelveSpeedup & \simdAVXFiveTwelveKfiveEonetwelveSpeedup \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -469,32 +535,32 @@ Matrix Size & SSE 128-bit & AVX2 256-bit \\
 
 \subsubsection{Q1: Change in Instruction Count from Naive to SIMD}
 
-\todo{Report the change in the number of instructions when moving from
-naive to the SIMD implementation. Justify your observations ---
-do instructions decrease? By how much? Is the reduction proportional
-to the SIMD width (4x for SSE, 8x for AVX2)? If not, why?
-(loop overhead, scalar remainder, setup instructions).}
+The instruction count \emph{increases} when moving from naive to SIMD --- by roughly 19\% for SSE, 10\% for AVX2, and 5\% for AVX-512.
+This is the opposite of the na\"ive expectation that vectorising $N$ operations into one vector instruction should reduce the count by $N\times$.
+The reason is that the compiler already generates efficient scalar code under \texttt{-O2}: the naive inner loop compiles to a tight sequence of scalar loads, multiplies, and adds.
+The SIMD versions replace those scalar arithmetic instructions with fewer vector instructions, but add overhead that the scalar version does not have: broadcast instructions (\texttt{set1}), explicit vector loads and stores, and loop setup for the vector width.
+At small $K$ ($K{=}3$, only 9 kernel positions), this overhead is a significant fraction of the total work per output pixel.
+The reduction is closer to the vector width ratio at larger $K$: for AVX-512 at $K{=}5$ the increase is only 5\%, because the 25 kernel positions amortise the per-pixel overhead better.
 
 \subsubsection{Q2: Speedup Analysis}
 
-\todo{Did you achieve any speedup? If so, how much, and what contributed
-to it? (reduced instruction count, better throughput per cycle,
-FMA combining multiply+add). If not, what were the reasons?
-(memory bandwidth bottleneck, cache misses dominating).}
+Despite the higher instruction count, SIMD achieves large speedups: SSE gives ${\sim}4.5\text{--}5.1\times$, AVX2 ${\sim}6.6\text{--}10.1\times$, and AVX-512 ${\sim}7.0\text{--}12.5\times$.
+The speedup comes from \emph{throughput}, not instruction count.
+Each vector FMA processes 4/8/16 multiply-adds in a single instruction that has roughly the same latency and throughput as one scalar FMA.
+So while the total instruction count is similar, the amount of useful work per instruction is $4\text{--}16\times$ higher.
+
+For $K{=}5$, speedups are more stable across matrix sizes (e.g.\ AVX-512: $11.5\text{--}12.5\times$) because the larger kernel makes the computation more compute-bound, keeping the vector units fully utilised.
+For $K{=}3$, speedups drop at larger sizes (e.g.\ AVX-512: $12.0\times$ at $512{\times}512$ down to $7.0\times$ at $8192{\times}8192$) as memory bandwidth starts to limit throughput --- the smaller kernel does less work per input byte fetched.
 
 \subsubsection{Q3: Choice of SIMD Intrinsics}
 
-\todo{Which SIMD intrinsics did you use? Justify your choice of functions.
-For example:
+Four intrinsics form the core of each SIMD width (shown for AVX2; SSE and AVX-512 use the corresponding \texttt{\_mm\_*} and \texttt{\_mm512\_*} variants):
 \begin{itemize}
-    \item \texttt{\_mm256\_loadu\_ps}: unaligned load --- needed because
-          input offsets are not always 32-byte aligned.
-    \item \texttt{\_mm256\_set1\_ps}: broadcast kernel weight to all lanes.
-    \item \texttt{\_mm256\_fmadd\_ps}: fused multiply-add --- combines
-          multiply and add into a single instruction, reducing latency
-          and instruction count.
-    \item \texttt{\_mm256\_storeu\_ps}: unaligned store of result.
-\end{itemize}}
+    \item \texttt{\_mm256\_loadu\_ps}: unaligned load of 8 floats from the input. Unaligned because the starting column \texttt{ox + kx} is not guaranteed to be 32-byte aligned.
+    \item \texttt{\_mm256\_set1\_ps}: broadcasts one kernel weight to all 8 lanes, so the same weight multiplies 8 adjacent input values in parallel.
+    \item \texttt{\_mm256\_fmadd\_ps}: fused multiply-add --- computes \texttt{a*b + c} in a single instruction. This halves the arithmetic instruction count compared to separate multiply and add, and avoids an intermediate rounding step.
+    \item \texttt{\_mm256\_storeu\_ps}: unaligned store of the 8-float result to the output row.
+\end{itemize}
 
 % ============================================================================
 \section{Task 1D: Sabka Saath Sabka Vikaas (2 points)}
@@ -502,12 +568,19 @@ For example:
 
 \subsection{Combined Optimized Implementation}
 
-\todo{Describe your combined implementation in \texttt{conv\_optimized.cpp}.
-Which techniques did you combine? (e.g.\ SIMD + tiling, SIMD +
-unrolling, SIMD + reordering, all of them). Explain how these
-techniques complement each other for synergistic gains --- i.e.\
-the combined benefit is greater than the sum of individual
-optimizations.}
+The combined implementation in \texttt{conv\_optimized.cpp} uses \textbf{SIMD + output-column unrolling} with the \textbf{naive loop order} and \textbf{runtime dispatch} between AVX2 and AVX-512.
+
+\textbf{Techniques combined:}
+\begin{itemize}
+    \item \textbf{Widest available SIMD.} AVX-512 (16 floats per vector) is used when the CPU supports it; otherwise AVX2 (8 floats). The dispatch is resolved once at startup via \texttt{\_\_builtin\_cpu\_supports("avx512f")}.
+    \item \textbf{Multi-accumulator unrolling.} Instead of one vector accumulator per iteration, 4 or 8 independent accumulators process 32--128 output columns per block (e.g.\ 8 accumulators $\times$ 16 floats = 128 columns for AVX-512). This breaks the FMA dependency chain, the same mechanism that made \texttt{unroll\_ox} the best scalar strategy.
+    \item \textbf{Naive loop order retained.} The per-stage sweeps showed that the reordered loop order is a net loss at large sizes due to multi-pass cache pressure. The naive order (\texttt{oy, ox, ky, kx}) keeps the working set small and avoids the zeroing and read-modify-write overhead.
+    \item \textbf{Tiling omitted.} The tiling sweep showed only $1.2\text{--}1.4\times$ improvement and actually increased L1 MPKI. Since the naive order already has good cache behaviour, tiling adds overhead without meaningful benefit.
+\end{itemize}
+
+These two techniques --- SIMD and multi-accumulator unrolling --- complement each other because they address different bottlenecks.
+SIMD increases the work per instruction (4--16 multiply-adds instead of 1), while multiple accumulators increase the work per cycle by letting the out-of-order core pipeline independent FMA chains.
+The combination multiplies: SIMD alone (single accumulator) gives ${\sim}7\text{--}12\times$, and adding 4--8 accumulators on top roughly doubles the throughput again at small sizes.
 
 \subsection{Speedup Results}
 
@@ -543,15 +616,31 @@ Matrix Size & K=3 Speedup & K=5 Speedup \\
 
 \subsection{Analysis}
 
-\todo{Discuss how these techniques complement each other:
+\textbf{Why combining yields more than the sum of parts.}
+SIMD and multi-accumulator unrolling target independent bottlenecks.
+SIMD increases the useful work per instruction (4--16 multiply-adds instead of 1), but with a single accumulator the FMA dependency chain still limits throughput.
+Unrolling alone (scalar) breaks the dependency chain but processes only one float per FMA.
+Combining them removes both limits simultaneously: each FMA operates on a full vector \emph{and} multiple independent chains keep the FMA units saturated.
+This is a multiplicative effect, which is why the combined optimized version ($20\text{--}25\times$ at small sizes) far exceeds what either technique achieves alone (SIMD alone: ${\sim}12\times$, unroll alone: ${\sim}3\times$).
+
+\textbf{Best combination.}
+AVX-512 with 8 independent accumulators (128 output columns per block) gives the highest peak speedup: $24.75\times$ at $512{\times}512$ for $K{=}5$.
+For $K{=}3$ the peak is $20.85\times$ at $512{\times}512$.
+
+\textbf{Bottleneck of the best implementation.}
+At small matrix sizes the implementation is compute-bound: the data fits in cache and the FMA units are the limiter.
+At large sizes ($4096{\times}4096$ and above) it becomes memory-bandwidth-bound: the speedup drops to ${\sim}7\times$ for $K{=}3$ and ${\sim}16\times$ for $K{=}5$.
+$K{=}3$ is more affected because it performs only $2 \times 3^{2} = 18$ flops per output pixel, so the ratio of computation to memory access is lower --- the vector units finish faster than memory can feed them.
+$K{=}5$ ($2 \times 5^{2} = 50$ flops per pixel) sustains higher speedups because more computation is done per byte fetched.
+
+\textbf{How each technique varies with size and kernel.}
 \begin{itemize}
-    \item Why does combining techniques yield more than the sum of parts?
-    \item Which combination gave the best speedup?
-    \item What is the bottleneck of your best implementation?
-          (compute-bound? memory-bound? Roofline analysis?)
-    \item How does the gain/loss of each technique vary with matrix size
-          and kernel size?
-\end{itemize}}
+    \item \textbf{Reordering} helps only at small sizes (cache-resident) and hurts at large sizes (multi-pass exceeds cache). Omitted from the final implementation.
+    \item \textbf{Tiling} gives a modest $1.2\text{--}1.4\times$ that is fairly stable across sizes, but increases L1 MPKI. Omitted because it does not help on top of the naive-order SIMD approach.
+    \item \textbf{Unrolling (scalar)} is stable at ${\sim}3\times$ across all sizes --- the gain is from ILP, not cache, so it does not degrade.
+    \item \textbf{SIMD} scales well but drops at large sizes for small $K$ due to memory bandwidth.
+    \item \textbf{Combined (SIMD + unrolling)} achieves the highest speedups overall, with the gain being largest at small sizes and for larger kernels.
+\end{itemize}
 
 % ============================================================================
 % END
