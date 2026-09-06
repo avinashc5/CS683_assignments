@@ -63,7 +63,11 @@ SIZE_KEYS = {512: 'Ftwelve', 1024: 'Ttwentyfour', 2048: 'Tfortyeight',
 
 K_KEYS = {3: 'Kthree', 5: 'Kfive'}
 
+_defined_cmds = set()
 def defcmd(name, val):
+    if name in _defined_cmds:
+        return
+    _defined_cmds.add(name)
     lines.append(f'\\newcommand{{\\{name}}}{{{val}}}')
 
 # ============================================================================
@@ -123,6 +127,9 @@ if os.path.exists(path):
 TILE_KEYS = {8: 'Eight', 16: 'Sixteen', 32: 'Thirtytwo', 64: 'Sixtyfour',
              128: 'Onetwentyeight', 256: 'Twofiftysix'}
 
+MODE_KEYS = {'naive+col': 'NaiveCol', 'naive+sq': 'NaiveSq',
+             'reorder+col': 'ReorderCol', 'reorder+sq': 'ReorderSq'}
+
 path = os.path.join(BASE, 'tile_results.txt')
 if os.path.exists(path):
     lines.append('')
@@ -131,22 +138,29 @@ if os.path.exists(path):
     with open(path) as f:
         for line in f:
             line = line.strip()
-            if not line or line.startswith('HxW') or line.startswith('='):
+            if not line or line.startswith('mode') or line.startswith('='):
                 continue
             parts = line.split()
-            if len(parts) < 10:
+            if len(parts) < 12:
                 continue
-            size = int(parts[0].split('x')[0])
-            K = int(parts[1])
-            tile_h = int(parts[2])
-            speedup = parse_speedup(parts[7])
-            naive_mpki = parse_float(parts[8])
-            tile_mpki = parse_float(parts[9])
+            mode = parts[0]
+            size = int(parts[1].split('x')[0])
+            K = int(parts[2])
+            tile_h = int(parts[3])
+            speedup = parse_speedup(parts[9])
+            naive_mpki = parse_float(parts[10])
+            tile_mpki = parse_float(parts[11])
 
-            if size in SIZE_KEYS and K in K_KEYS and tile_h in TILE_KEYS:
-                prefix = f'tile{TILE_KEYS[tile_h]}{K_KEYS[K]}{SIZE_KEYS[size]}'
+            if size in SIZE_KEYS and K in K_KEYS and tile_h in TILE_KEYS and mode in MODE_KEYS:
+                prefix = f'tile{MODE_KEYS[mode]}{TILE_KEYS[tile_h]}{K_KEYS[K]}{SIZE_KEYS[size]}'
                 defcmd(f'{prefix}Speedup', speedup)
                 defcmd(f'{prefix}MPKI', fmt_float(tile_mpki))
+
+                # Backward-compat: reorder+col macros without the mode prefix
+                if mode == 'reorder+col':
+                    old_prefix = f'tile{TILE_KEYS[tile_h]}{K_KEYS[K]}{SIZE_KEYS[size]}'
+                    defcmd(f'{old_prefix}Speedup', speedup)
+                    defcmd(f'{old_prefix}MPKI', fmt_float(tile_mpki))
 
                 key = (K, size)
                 if key not in naive_mpki_written and naive_mpki is not None:

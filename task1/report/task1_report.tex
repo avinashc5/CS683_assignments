@@ -401,6 +401,69 @@ First, the strip does not fit in L1, so every pass through it incurs L1 misses (
 Second, the reordered order requires the output to be zeroed first and then accumulated with read-modify-write operations, adding overhead that the naive order avoids (it writes each output pixel exactly once).
 For large tile heights (128, 256) at large matrix sizes, the strip exceeds even L2 and the speedup disappears --- \texttt{TILE\_H}=256 at $8192{\times}8192$ is $0.63\times$ for $K{=}3$, a net slowdown.
 
+\subsection{Extended Analysis: Tiling Strategy Comparison}
+
+We implemented all four combinations of loop order $\times$ tiling shape:
+\begin{enumerate}
+    \item \textbf{Naive + Column}: naive order (\texttt{oy,ox,ky,kx}) with row-strip tiling (\texttt{TILE\_H} $\times$ $W$).
+    \item \textbf{Naive + Square}: naive order with square tiles (\texttt{TILE\_H} $\times$ \texttt{TILE\_W}).
+    \item \textbf{Reorder + Column}: reordered (\texttt{ky,kx,oy,ox}) with row-strip tiling (the variant analysed above).
+    \item \textbf{Reorder + Square}: reordered with square tiles.
+\end{enumerate}
+
+Each combination was swept across tile heights (8--256), tile widths (32--256 for square modes), matrix sizes (512--8192), and kernel sizes (3, 5).
+
+\subsubsection{Mode Comparison: Best-Config Speedup}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{../plots/tile_mode_comparison_K3.png}
+\caption{Best speedup per tiling mode across matrix sizes (K=3). Each point is the best tile configuration for that mode at that size.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{../plots/tile_mode_comparison_K5.png}
+\caption{Best speedup per tiling mode across matrix sizes (K=5).}
+\end{figure}
+
+The naive-order modes consistently outperform or match the reordered modes.
+\textbf{Naive + Column} is the clear winner: it achieves a small but consistent speedup without the L1 MPKI penalty of the reordered variants.
+This is because the naive order already has near-optimal cache behavior --- it touches only $K$ input rows per output row and writes each output once.
+Column tiling on top of it simply bounds the row-strip height, which helps at very large matrix sizes.
+
+Square tiling in both loop orders adds overhead from the extra tile-boundary bookkeeping and, for the reordered case, forces the output to be zeroed and accumulated in smaller blocks that reduce spatial locality.
+
+\subsubsection{MPKI Comparison Across Modes}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{../plots/tile_mode_mpki_K3.png}
+\caption{L1-D MPKI comparison across tiling modes at best tile config (K=3).}
+\end{figure}
+
+The reordered modes show $4\text{--}5\times$ higher L1-D MPKI than the naive modes, confirming that the $K^{2}$ passes over the output strip cause systematic L1 thrashing.
+The naive-order modes maintain MPKI close to the untiled baseline because they preserve the single-pass output access pattern.
+
+\subsubsection{Square Tiling Heatmaps}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.48\textwidth]{../plots/tile_heatmap_naive_sq_K3.png}
+\hfill
+\includegraphics[width=0.48\textwidth]{../plots/tile_heatmap_reorder_sq_K3.png}
+\caption{Speedup heatmaps for square tiling at $2048{\times}2048$, K=3. Left: Naive + Square. Right: Reorder + Square. Values $<1.0$ indicate slowdown.}
+\end{figure}
+
+The heatmaps reveal that square tiling rarely helps: most tile-height/tile-width combinations produce speedups near or below $1.0\times$.
+Reordered + Square is the worst strategy, with many configurations showing significant slowdowns.
+
+\subsubsection{Key Takeaway}
+
+Tiling is most effective when it works \emph{with} the natural access pattern, not against it.
+The naive loop order already streams input rows sequentially; column tiling restricts the vertical extent and keeps the working set bounded, yielding a modest but reliable improvement.
+Reordering the loops to hoist kernel weights sacrifices this streaming property in exchange for fewer weight loads --- a trade-off that only pays off at small matrix sizes and rapidly degrades as caches overflow.
+
 % ============================================================================
 \section{Task 1C: SIMD (2 points)}
 % ============================================================================

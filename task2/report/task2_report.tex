@@ -1,0 +1,273 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage{float}
+\usepackage{subcaption}
+\usepackage{enumitem}
+
+\newcommand{\todo}[1]{{\color{red}\textbf{[TODO: #1]}}}
+
+% Auto-generated data macros from benchmark results.
+% Regenerate: cd task2 && python3 generate_data.py
+\input{data.tex}
+
+\title{CS683 Programming Assignment 1 --- Task 2\\
+Matrix Multiplication for Inference}
+\author{Avinash Chaudhari -- 23B1064 \and Pranay Marumamula -- 23B1073 \and Siddhant Mulkikar -- 23B0956 \and Madhav R Babu -- 23B1060}
+\date{Autumn 2026}
+
+\begin{document}
+\maketitle
+
+% ============================================================================
+\section{System Configuration}
+% ============================================================================
+
+\begin{itemize}
+    \item \textbf{CPU:} Intel Core i5-11400H (Tiger Lake-H), 6 cores / 6 threads
+          (SMT disabled), all identical P-cores, base 2.70 GHz, max 4.50 GHz
+    \item \textbf{L1-D Cache:} 48 KiB per core (288 KiB total, 6 instances),
+          64-byte lines, 12-way set associative
+    \item \textbf{L2 Cache:} 1.25 MiB per core (7.5 MiB total, 6 instances), 20-way
+    \item \textbf{L3 Cache:} 12 MiB (1 instance, shared), 8-way
+    \item \textbf{Vector ISA:} AVX2 + FMA and AVX-512
+          (\texttt{avx512f}, \texttt{avx512dq}, \texttt{avx512bw}, \texttt{avx512vl},
+          \texttt{avx512\_vnni})
+    \item \textbf{Compiler flags:} \texttt{-std=c++17 -O2 -fno-tree-vectorize -mavx2 -mfma}
+    \item \textbf{OS:} Ubuntu 24.04.4 LTS, kernel 6.8.0-138-generic (x86\_64)
+    \item \textbf{Pinning:} \texttt{taskset -c 3}. This CPU is not hybrid, so every core
+          is equivalent; a single fixed core is used so all measurements share one
+          cache and frequency context.
+    \item \textbf{Frequency governor:} \texttt{performance}, with
+          \texttt{kernel.perf\_event\_paranoid = -1} so \texttt{perf} can read the
+          hardware counters used for cache miss and instruction count measurements.
+\end{itemize}
+
+% ============================================================================
+\section{Task 2A: Software Prefetching (5 points)}
+% ============================================================================
+
+\todo{Task 2A to be completed separately.}
+
+% ============================================================================
+\section{Task 2B: SIMD (1 point)}
+% ============================================================================
+
+\subsection{SIMD Implementation}
+
+The SGEMM kernel uses a \textbf{register-tiled vectorized dot product} approach.
+The matrix layout stores both $A$ and $B$ with the reduction axis $K$ as the contiguous (unit-stride) dimension: $C[i][j] = \sum_p A[i][p] \cdot B[j][p]$.
+This means the natural SIMD strategy is to vectorize the dot product over $p$.
+
+The micro-kernel computes a $4 \times 2$ block of $C$ at once using 8 independent \texttt{\_\_m256} accumulators:
+\begin{itemize}[nosep]
+    \item For each step along $K$, two \texttt{\_mm256\_loadu\_ps} loads fetch 8 elements from two rows of $B$.
+    \item Four \texttt{\_mm256\_broadcast\_ss} calls broadcast one element from each of four $A$ rows.
+    \item Eight \texttt{\_mm256\_fmadd\_ps} instructions accumulate all $4 \times 2 = 8$ partial-product vectors.
+\end{itemize}
+This yields 8 FMAs per step from only 6 loads, and the 8 independent accumulator chains saturate the FMA pipeline (FMA latency ${\sim}4$ cycles, throughput $2$/cycle, requiring ${\geq}8$ independent chains).
+After the $K$ loop, each accumulator is horizontally reduced (\texttt{hsum256}) to a single scalar, stored into the corresponding $C[i][j]$.
+
+Leftover rows ($M \bmod 4$), columns ($N \bmod 2$), and $K$ elements ($K \bmod 8$) fall to a scalar cleanup path.
+
+Three SIMD widths were benchmarked:
+\begin{itemize}[nosep]
+    \item \textbf{SSE 128-bit}: 4 floats per vector, $4 \times 2$ register tile, 8 accumulators
+    \item \textbf{AVX2 256-bit}: 8 floats per vector, $4 \times 2$ register tile, 8 accumulators
+    \item \textbf{AVX-512 512-bit}: 16 floats per vector, $4 \times 2$ register tile, 8 accumulators
+\end{itemize}
+None of these include cache blocking --- the kernel streams through $A$ and $B$ from whatever cache level holds them.
+
+\subsection{Instruction Count and Performance}
+
+\begin{table}[H]
+\centering
+\caption{Instruction count and speedup for different SIMD widths}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{ll|rrrrr}
+\toprule
+& & \multicolumn{5}{c}{Matrix Size ($M = N = K$)} \\
+Metrics & & 128 & 256 & 512 & 1024 & 2048 \\
+\midrule
+\textbf{No SIMD}  & Instructions & \simdWidthNaiveOhtwentyeightInsns & \simdWidthNaiveTwofiftysixInsns & \simdWidthNaiveFtwelveInsns & \simdWidthNaiveTtwentyfourInsns & \simdWidthNaiveTfortyeightInsns \\
+                   & GFLOP/s      & \simdWidthNaiveOhtwentyeightGflops & \simdWidthNaiveTwofiftysixGflops & \simdWidthNaiveFtwelveGflops & \simdWidthNaiveTtwentyfourGflops & \simdWidthNaiveTfortyeightGflops \\
+\midrule
+\textbf{SSE 128}   & Instructions & \simdWidthSSEOhtwentyeightInsns & \simdWidthSSETwofiftysixInsns & \simdWidthSSEFtwelveInsns & \simdWidthSSETtwentyfourInsns & \simdWidthSSETfortyeightInsns \\
+                   & GFLOP/s      & \simdWidthSSEOhtwentyeightGflops & \simdWidthSSETwofiftysixGflops & \simdWidthSSEFtwelveGflops & \simdWidthSSETtwentyfourGflops & \simdWidthSSETfortyeightGflops \\
+                   & Speedup      & \simdWidthSSEOhtwentyeightSpeedup & \simdWidthSSETwofiftysixSpeedup & \simdWidthSSEFtwelveSpeedup & \simdWidthSSETtwentyfourSpeedup & \simdWidthSSETfortyeightSpeedup \\
+\midrule
+\textbf{AVX2 256}  & Instructions & \simdWidthAVXOhtwentyeightInsns & \simdWidthAVXTwofiftysixInsns & \simdWidthAVXFtwelveInsns & \simdWidthAVXTtwentyfourInsns & \simdWidthAVXTfortyeightInsns \\
+                   & GFLOP/s      & \simdWidthAVXOhtwentyeightGflops & \simdWidthAVXTwofiftysixGflops & \simdWidthAVXFtwelveGflops & \simdWidthAVXTtwentyfourGflops & \simdWidthAVXTfortyeightGflops \\
+                   & Speedup      & \simdWidthAVXOhtwentyeightSpeedup & \simdWidthAVXTwofiftysixSpeedup & \simdWidthAVXFtwelveSpeedup & \simdWidthAVXTtwentyfourSpeedup & \simdWidthAVXTfortyeightSpeedup \\
+\midrule
+\textbf{AVX-512}   & Instructions & \simdWidthAVXFiveTwelveOhtwentyeightInsns & \simdWidthAVXFiveTwelveTwofiftysixInsns & \simdWidthAVXFiveTwelveFtwelveInsns & \simdWidthAVXFiveTwelveTtwentyfourInsns & \simdWidthAVXFiveTwelveTfortyeightInsns \\
+                   & GFLOP/s      & \simdWidthAVXFiveTwelveOhtwentyeightGflops & \simdWidthAVXFiveTwelveTwofiftysixGflops & \simdWidthAVXFiveTwelveFtwelveGflops & \simdWidthAVXFiveTwelveTtwentyfourGflops & \simdWidthAVXFiveTwelveTfortyeightGflops \\
+                   & Speedup      & \simdWidthAVXFiveTwelveOhtwentyeightSpeedup & \simdWidthAVXFiveTwelveTwofiftysixSpeedup & \simdWidthAVXFiveTwelveFtwelveSpeedup & \simdWidthAVXFiveTwelveTtwentyfourSpeedup & \simdWidthAVXFiveTwelveTfortyeightSpeedup \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\textbf{Instruction count observation:} SIMD does \emph{not} significantly reduce instruction count --- the SIMD versions issue roughly the same number of instructions as the naive version (within ${\sim}7\%$).
+This is because the register-tiled micro-kernel still executes $O(MNK)$ FMA instructions; SIMD packs 4/8/16 multiply-adds into each instruction but also adds overhead from broadcasts, horizontal reductions, and cleanup.
+The speedup comes not from fewer instructions but from each instruction doing $4{\times}$/$8{\times}$/$16{\times}$ more work.
+
+\subsection{Plots}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{../plots/simd_width_speedup.png}
+\caption{SIMD speedup vs.\ matrix size for different register widths}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{../plots/simd_width_gflops.png}
+\caption{SGEMM throughput (GFLOP/s) by SIMD width}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{../plots/simd_width_insns.png}
+\caption{Instruction count by SIMD width (log scale)}
+\end{figure}
+
+\subsection{Analysis Questions}
+
+\subsubsection{Q1: Speedup Trends}
+
+Three trends are visible:
+
+\begin{enumerate}
+    \item \textbf{Wider SIMD $\Rightarrow$ higher peak speedup.}
+    AVX-512 reaches \simdWidthAVXFiveTwelveFtwelveSpeedup{} at $512{\times}512$, AVX2 reaches \simdWidthAVXFtwelveSpeedup{}, and SSE reaches \simdWidthSSEFtwelveSpeedup{}.
+    The ratio tracks the vector width (roughly $2{\times}$ per doubling) but falls short of the theoretical $4{\times}$/$8{\times}$/$16{\times}$ due to load/broadcast overhead and the horizontal reduction at the end.
+
+    \item \textbf{Speedup rises then falls with matrix size.}
+    At small sizes (128) the loop overhead and scalar cleanup dominate, limiting SSE to \simdWidthSSEOhtwentyeightSpeedup{}.
+    Peak is around $512$--$1024$, where the working set fits mostly in L2 and the micro-kernel runs at near-peak throughput.
+    At $2048$ all widths drop significantly (AVX-512 falls from \simdWidthAVXFiveTwelveFtwelveSpeedup{} to \simdWidthAVXFiveTwelveTfortyeightSpeedup{}) because the $A$ and $B$ matrices no longer fit in L2, and the unblocked kernel becomes memory-bound.
+
+    \item \textbf{AVX2 and AVX-512 converge at small sizes.}
+    At $128{\times}128$, AVX2 (\simdWidthAVXOhtwentyeightSpeedup{}) nearly matches AVX-512 (\simdWidthAVXFiveTwelveOhtwentyeightSpeedup{}) because the problem is too small for the wider vector to amortize its overhead.
+\end{enumerate}
+
+\subsubsection{Q2: Best SIMD Width}
+
+\textbf{AVX-512 (512-bit)} achieves the maximum speedup at every matrix size where the kernel is not memory-bound.
+The peak is \simdWidthAVXFiveTwelveFtwelveSpeedup{} at $512{\times}512$ (\simdWidthAVXFiveTwelveFtwelveGflops{} GFLOP/s).
+This is expected: each 512-bit FMA processes 16 floats, double AVX2's 8, so the arithmetic throughput doubles while instruction-issue overhead stays roughly constant.
+
+However, at $2048{\times}2048$ the advantage narrows (AVX-512 \simdWidthAVXFiveTwelveTfortyeightSpeedup{} vs AVX2 \simdWidthAVXTfortyeightSpeedup{}) because the bottleneck shifts from compute to memory bandwidth.
+Cache blocking (Task 2C) is required to sustain AVX-512's higher throughput at large sizes.
+
+% ============================================================================
+\section{Task 2C: Software Prefetching + SIMD (3 points)}
+% ============================================================================
+
+\subsection{Combined Implementation}
+
+The combined kernel (\texttt{matmul\_optimized.cpp}) layers three techniques on top of the Stage-1 SIMD micro-kernel:
+
+\begin{enumerate}[nosep]
+    \item \textbf{6$\times$16 AVX2 micro-kernel.} Each output tile spans 6 rows of $C$ and 16 contiguous columns, held in 12 \texttt{\_\_m256} accumulators (two per row: \texttt{c0l}/\texttt{c0h} through \texttt{c5l}/\texttt{c5h}).
+    Per $K$ step: 2 packed-$B$ loads + 6 $A$ broadcasts $\rightarrow$ 12 FMAs.
+    The 12 independent chains hide FMA latency and keep the pipeline saturated.
+
+    \item \textbf{B-panel packing.} $B$ is stored column-major (K contiguous per column), so loading 16 columns at position $p$ would be strided.
+    Before each $NC$-column block, $B$ is packed into a scratch buffer $\texttt{Bpack}[p][j]$ so that the micro-kernel's $B$ loads are unit-stride.
+
+    \item \textbf{Cache blocking.} The output is traversed in $MC{\times}NC$ blocks (default $MC{=}96$, $NC{=}64$) with loop order $jc \rightarrow ic \rightarrow jr \rightarrow ir$.
+    The packed $B$ panel ($K \times NC$ floats) is reused across all $MC$ rows, and each $A$ sub-panel ($MC \times K$) is reused across all $NC$ columns, so both stay resident in L2.
+\end{enumerate}
+
+\todo{Software prefetch analysis to be updated after Task 2A is re-run with the corrected (non-SIMD) prefetch code.}
+
+\subsection{Hardware Counter Analysis}
+
+\todo{Hardware counter table and analysis to be updated after Task 2A prefetch code is finalized and perf counters are re-collected.}
+
+\begin{table}[H]
+\centering
+\caption{Hardware counters per stage ($M{=}N{=}K{=}1024$, cold cache)}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lrrrrr}
+\toprule
+Stage & Instructions & L1-D Misses & L2 Misses & LLC Misses & IPC \\
+\midrule
+Naive           & \perfNaiveInsns & \perfNaiveLoneDmiss & \perfNaiveLtwoMiss & \perfNaiveLLCmiss & \perfNaiveIPC \\
+SIMD            & \perfSimdInsns & \perfSimdLoneDmiss & \perfSimdLtwoMiss & \perfSimdLLCmiss & \perfSimdIPC \\
+Prefetch        & \todo{re-run} & \todo{re-run} & \todo{re-run} & \todo{re-run} & \todo{re-run} \\
+Prefetch + SIMD & \perfOptimizedInsns & \perfOptimizedLoneDmiss & \perfOptimizedLtwoMiss & \perfOptimizedLLCmiss & \perfOptimizedIPC \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\todo{Key observations to be rewritten once prefetch row is updated.}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{../plots/perf_cache_misses.png}
+\caption{Cache misses by stage (M=N=K=1024, cold cache, log scale). \todo{Regenerate after prefetch re-run.}}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{../plots/perf_insns_ipc.png}
+\caption{Instruction count and IPC by stage (M=N=K=1024). \todo{Regenerate after prefetch re-run.}}
+\end{figure}
+
+\subsection{Final Performance Summary}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{../plots/task2_final_comparison.png}
+\caption{Technique comparison across matrix sizes: speedup over naive SGEMM.}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.85\textwidth]{../plots/task2_gflops_comparison.png}
+\caption{SGEMM throughput (GFLOP/s) for all techniques.}
+\end{figure}
+
+\begin{table}[H]
+\centering
+\caption{Best speedup per technique across matrix sizes}
+\begin{tabular}{lrrr}
+\toprule
+Matrix Size & SIMD & Prefetch & Prefetch + SIMD \\
+\midrule
+128   & \sweepSimdOhtwentyeightSpeedup & \todo{re-run} & \sweepOptimizedOhtwentyeightSpeedup \\
+256   & \sweepSimdTwofiftysixSpeedup & \todo{re-run} & \sweepOptimizedTwofiftysixSpeedup \\
+512   & \sweepSimdFtwelveSpeedup & \todo{re-run} & \sweepOptimizedFtwelveSpeedup \\
+1024  & \sweepSimdTtwentyfourSpeedup & \todo{re-run} & \sweepOptimizedTtwentyfourSpeedup \\
+2048  & \sweepSimdTfortyeightSpeedup & \todo{re-run} & \sweepOptimizedTfortyeightSpeedup \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Analysis: Synergy Between Techniques}
+
+\todo{Synergy analysis to be rewritten after Task 2A prefetch results are finalized. The key argument --- SIMD removes the compute bottleneck while blocking removes the memory bottleneck, and the combination exceeds either alone --- will remain, but the specific numbers (prefetch-only speedup, crossover point, GFLOP/s comparisons) need to come from the updated prefetch data.}
+
+The combined kernel achieves a peak of \sweepOptimizedFifteenthirtysixSpeedup{} at $1536{\times}1536$.
+
+The synergy is not additive but \emph{complementary}:
+\begin{itemize}[nosep]
+    \item \textbf{SIMD without blocking} is compute-efficient at small sizes but becomes memory-bound at large sizes. At $2048$, SIMD-only drops to \sweepSimdTfortyeightSpeedup{} because the operands spill out of L2 and every tile re-streams them from DRAM.
+
+    \item \textbf{Blocking without SIMD} (the prefetch stage) keeps the data cache-resident but is limited by scalar instruction throughput. \todo{Update with actual prefetch-only throughput after 2A re-run.}
+
+    \item \textbf{Combined}: cache blocking ensures the operands stay in L2, and SIMD ensures the FMA units are fully utilized while the data is resident. \todo{Update GFLOP/s comparisons and lift factors after 2A re-run.}
+
+    \item The crossover point is clear in the speedup plot: SIMD-only dominates at small sizes (where data fits in cache anyway), but the combined kernel dominates at large sizes where blocking prevents the SIMD kernel from going memory-bound.
+\end{itemize}
+
+\end{document}

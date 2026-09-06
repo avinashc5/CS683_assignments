@@ -36,80 +36,220 @@ def parse_float(s):
 # ============================================================================
 # TILE plots
 # ============================================================================
-def plot_tile():
+def _parse_tile_results():
+    """Parse tile_results.txt (new 4-mode format with mode, tile_w columns)."""
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'tile_results.txt')
     if not os.path.exists(path):
-        print(f"  skip tile plots: {path} not found")
-        return
+        return None, None
 
-    # Parse: {K: {tile_h: {size: {field: val}}}}
-    data = defaultdict(lambda: defaultdict(lambda: defaultdict(dict)))
+    # {mode: {K: {(tile_h, tile_w): {size: {field: val}}}}}
+    data = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(dict))))
     naive_mpki = defaultdict(lambda: defaultdict(lambda: None))
 
     with open(path) as f:
         for line in f:
             line = line.strip()
-            if not line or line.startswith('HxW') or line.startswith('='):
+            if not line or line.startswith('mode') or line.startswith('='):
                 continue
             parts = line.split()
-            if len(parts) < 10:
+            if len(parts) < 12:
                 continue
-            size_str, K, tile_h = parts[0], parts[1], parts[2]
-            size = int(size_str.split('x')[0])
-            K = int(K)
-            tile_h = int(tile_h)
-            speedup = parse_speedup(parts[7])
-            n_mpki = parse_float(parts[8])
-            t_mpki = parse_float(parts[9])
+            mode = parts[0]         # e.g. "naive+col"
+            size = int(parts[1].split('x')[0])
+            K = int(parts[2])
+            tile_h = int(parts[3])
+            tile_w_str = parts[4]
+            tile_w = tile_w_str if tile_w_str == 'W' else int(tile_w_str)
+            speedup = parse_speedup(parts[9])
+            n_mpki = parse_float(parts[10])
+            t_mpki = parse_float(parts[11])
 
-            data[K][tile_h][size]['speedup'] = speedup
-            data[K][tile_h][size]['tile_mpki'] = t_mpki
+            data[mode][K][(tile_h, tile_w)][size]['speedup'] = speedup
+            data[mode][K][(tile_h, tile_w)][size]['tile_mpki'] = t_mpki
             if n_mpki is not None:
                 naive_mpki[K][size] = n_mpki
 
-    tile_sizes = sorted({th for K in data for th in data[K]})
-    colors = plt.cm.tab10(np.linspace(0, 1, len(tile_sizes) + 1))
+    return data, naive_mpki
 
-    for K in sorted(data.keys()):
-        # --- MPKI vs Matrix Size ---
-        fig, ax = plt.subplots(figsize=(8, 5))
-        # naive baseline
-        naive_vals = [naive_mpki[K].get(s) for s in SIZES]
-        if any(v is not None for v in naive_vals):
-            ax.plot(SIZE_LABELS, [v if v else 0 for v in naive_vals],
-                    'k--o', linewidth=2, label='Naive', markersize=6)
-        for i, th in enumerate(tile_sizes):
-            vals = [data[K][th].get(s, {}).get('tile_mpki') for s in SIZES]
+
+def plot_tile():
+    raw, naive_mpki = _parse_tile_results()
+    if raw is None:
+        print("  skip tile plots: tile_results.txt not found")
+        return
+
+    MODE_LABELS = {
+        'naive+col': 'Naive + Column',
+        'naive+sq': 'Naive + Square',
+        'reorder+col': 'Reorder + Column',
+        'reorder+sq': 'Reorder + Square',
+    }
+    MODE_COLORS = {
+        'naive+col': 'tab:blue',
+        'naive+sq': 'tab:cyan',
+        'reorder+col': 'tab:orange',
+        'reorder+sq': 'tab:red',
+    }
+
+    # ---- Per-mode plots (speedup and MPKI vs size, one line per tile_h) ----
+    # For backward compatibility, plot reorder+col as the "main" tile plots
+    for mode in ['reorder+col']:
+        if mode not in raw:
+            continue
+        for K in sorted(raw[mode].keys()):
+            tile_configs = sorted(raw[mode][K].keys())
+            tile_hs = sorted(set(th for th, tw in tile_configs))
+            colors = plt.cm.tab10(np.linspace(0, 1, max(len(tile_hs), 1) + 1))
+
+            # MPKI
+            fig, ax = plt.subplots(figsize=(8, 5))
+            nvals = [naive_mpki[K].get(s) for s in SIZES]
+            if any(v is not None for v in nvals):
+                ax.plot(SIZE_LABELS, [v if v else 0 for v in nvals],
+                        'k--o', linewidth=2, label='Naive', markersize=6)
+            for i, th in enumerate(tile_hs):
+                key = (th, 'W')
+                vals = [raw[mode][K].get(key, {}).get(s, {}).get('tile_mpki') for s in SIZES]
+                if any(v is not None for v in vals):
+                    ax.plot(SIZE_LABELS, [v if v else 0 for v in vals],
+                            '-o', color=colors[i], label=f'Tile {th}', markersize=5)
+            ax.set_xlabel('Matrix Size (H = W)')
+            ax.set_ylabel('L1-D MPKI')
+            ax.set_title(f'L1-D MPKI vs Matrix Size (K={K})')
+            ax.legend(fontsize=8)
+            ax.grid(True, alpha=0.3)
+            fig.tight_layout()
+            fig.savefig(os.path.join(PLOT_DIR, f'tile_mpki_K{K}.png'), dpi=150)
+            plt.close(fig)
+            print(f"  saved tile_mpki_K{K}.png")
+
+            # Speedup
+            fig, ax = plt.subplots(figsize=(8, 5))
+            ax.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5, label='Naive (1.0x)')
+            for i, th in enumerate(tile_hs):
+                key = (th, 'W')
+                vals = [raw[mode][K].get(key, {}).get(s, {}).get('speedup') for s in SIZES]
+                if any(v is not None for v in vals):
+                    ax.plot(SIZE_LABELS, [v if v else 0 for v in vals],
+                            '-o', color=colors[i], label=f'Tile {th}', markersize=5)
+            ax.set_xlabel('Matrix Size (H = W)')
+            ax.set_ylabel('Speedup over Naive')
+            ax.set_title(f'Tiling Speedup vs Matrix Size (K={K})')
+            ax.legend(fontsize=8)
+            ax.grid(True, alpha=0.3)
+            fig.tight_layout()
+            fig.savefig(os.path.join(PLOT_DIR, f'tile_speedup_K{K}.png'), dpi=150)
+            plt.close(fig)
+            print(f"  saved tile_speedup_K{K}.png")
+
+    # ---- NEW: 4-mode comparison plots ----
+    # For each K: pick the best tile config per mode, plot speedup across sizes
+    for K in sorted(set(k for m in raw for k in raw[m])):
+        # --- Best-config speedup comparison across modes ---
+        fig, ax = plt.subplots(figsize=(9, 5.5))
+        ax.axhline(y=1.0, color='gray', linestyle='--', alpha=0.4)
+        for mode in ['naive+col', 'naive+sq', 'reorder+col', 'reorder+sq']:
+            if mode not in raw or K not in raw[mode]:
+                continue
+            # For each size, find the tile config that gives best speedup
+            best_vals = []
+            for s in SIZES:
+                best = None
+                for cfg in raw[mode][K]:
+                    v = raw[mode][K][cfg].get(s, {}).get('speedup')
+                    if v is not None and (best is None or v > best):
+                        best = v
+                best_vals.append(best if best else 0)
+            ax.plot(SIZE_LABELS, best_vals, '-o',
+                    color=MODE_COLORS.get(mode, 'gray'),
+                    label=MODE_LABELS.get(mode, mode),
+                    markersize=6, linewidth=2)
+        ax.set_xlabel('Matrix Size (H = W)')
+        ax.set_ylabel('Best Speedup over Naive')
+        ax.set_title(f'Tiling Mode Comparison — Best Config per Mode (K={K})')
+        ax.legend(fontsize=9)
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+        fig.savefig(os.path.join(PLOT_DIR, f'tile_mode_comparison_K{K}.png'), dpi=150)
+        plt.close(fig)
+        print(f"  saved tile_mode_comparison_K{K}.png")
+
+        # --- MPKI comparison across modes (best tile_h, column modes) ---
+        fig, ax = plt.subplots(figsize=(9, 5.5))
+        nvals = [naive_mpki[K].get(s) for s in SIZES]
+        if any(v is not None for v in nvals):
+            ax.plot(SIZE_LABELS, [v if v else 0 for v in nvals],
+                    'k--o', linewidth=2, label='Naive (no tiling)', markersize=6)
+        for mode in ['naive+col', 'naive+sq', 'reorder+col', 'reorder+sq']:
+            if mode not in raw or K not in raw[mode]:
+                continue
+            # Pick tile config with best average speedup to show its MPKI
+            cfgs = list(raw[mode][K].keys())
+            def avg_speedup(cfg):
+                vals = [raw[mode][K][cfg].get(s, {}).get('speedup', 0) or 0 for s in SIZES]
+                return sum(vals) / len(vals)
+            best_cfg = max(cfgs, key=avg_speedup) if cfgs else None
+            if best_cfg is None:
+                continue
+            th, tw = best_cfg
+            tw_label = str(tw) if tw != 'W' else 'W'
+            vals = [raw[mode][K][best_cfg].get(s, {}).get('tile_mpki') for s in SIZES]
             if any(v is not None for v in vals):
-                ax.plot(SIZE_LABELS, [v if v else 0 for v in vals],
-                        '-o', color=colors[i], label=f'Tile {th}', markersize=5)
+                ax.plot(SIZE_LABELS, [v if v else 0 for v in vals], '-o',
+                        color=MODE_COLORS.get(mode, 'gray'),
+                        label=f'{MODE_LABELS.get(mode, mode)} ({th}×{tw_label})',
+                        markersize=5, linewidth=1.5)
         ax.set_xlabel('Matrix Size (H = W)')
         ax.set_ylabel('L1-D MPKI')
-        ax.set_title(f'L1-D MPKI vs Matrix Size (K={K})')
+        ax.set_title(f'L1-D MPKI: Tiling Mode Comparison (K={K})')
         ax.legend(fontsize=8)
         ax.grid(True, alpha=0.3)
         fig.tight_layout()
-        fig.savefig(os.path.join(PLOT_DIR, f'tile_mpki_K{K}.png'), dpi=150)
+        fig.savefig(os.path.join(PLOT_DIR, f'tile_mode_mpki_K{K}.png'), dpi=150)
         plt.close(fig)
-        print(f"  saved tile_mpki_K{K}.png")
+        print(f"  saved tile_mode_mpki_K{K}.png")
 
-        # --- Speedup vs Matrix Size ---
-        fig, ax = plt.subplots(figsize=(8, 5))
-        ax.axhline(y=1.0, color='gray', linestyle='--', alpha=0.5, label='Naive (1.0x)')
-        for i, th in enumerate(tile_sizes):
-            vals = [data[K][th].get(s, {}).get('speedup') for s in SIZES]
-            if any(v is not None for v in vals):
-                ax.plot(SIZE_LABELS, [v if v else 0 for v in vals],
-                        '-o', color=colors[i], label=f'Tile {th}', markersize=5)
-        ax.set_xlabel('Matrix Size (H = W)')
-        ax.set_ylabel('Speedup over Naive')
-        ax.set_title(f'Tiling Speedup vs Matrix Size (K={K})')
-        ax.legend(fontsize=8)
-        ax.grid(True, alpha=0.3)
-        fig.tight_layout()
-        fig.savefig(os.path.join(PLOT_DIR, f'tile_speedup_K{K}.png'), dpi=150)
-        plt.close(fig)
-        print(f"  saved tile_speedup_K{K}.png")
+        # --- Heatmap: square tiling speedup as function of tile_h x tile_w ---
+        for mode in ['naive+sq', 'reorder+sq']:
+            if mode not in raw or K not in raw[mode]:
+                continue
+            cfgs = raw[mode][K]
+            th_set = sorted(set(th for th, tw in cfgs if tw != 'W'))
+            tw_set = sorted(set(tw for th, tw in cfgs if tw != 'W'))
+            if not th_set or not tw_set:
+                continue
+            # Pick the 2048x2048 size for the heatmap (graded workload)
+            target_size = 2048
+            grid = np.full((len(th_set), len(tw_set)), np.nan)
+            for i, th in enumerate(th_set):
+                for j, tw in enumerate(tw_set):
+                    v = cfgs.get((th, tw), {}).get(target_size, {}).get('speedup')
+                    if v is not None:
+                        grid[i, j] = v
+
+            fig, ax = plt.subplots(figsize=(7, 5))
+            im = ax.imshow(grid, cmap='RdYlGn', aspect='auto',
+                           vmin=min(0.5, np.nanmin(grid)), vmax=max(1.5, np.nanmax(grid)))
+            ax.set_xticks(range(len(tw_set)))
+            ax.set_xticklabels([str(tw) for tw in tw_set])
+            ax.set_yticks(range(len(th_set)))
+            ax.set_yticklabels([str(th) for th in th_set])
+            ax.set_xlabel('Tile Width')
+            ax.set_ylabel('Tile Height')
+            mode_label = MODE_LABELS.get(mode, mode)
+            ax.set_title(f'{mode_label}: Speedup at {target_size}×{target_size} (K={K})')
+            for i in range(len(th_set)):
+                for j in range(len(tw_set)):
+                    v = grid[i, j]
+                    if not np.isnan(v):
+                        ax.text(j, i, f'{v:.2f}', ha='center', va='center',
+                                fontsize=8, color='black' if 0.7 < v < 1.3 else 'white')
+            fig.colorbar(im, ax=ax, label='Speedup')
+            fig.tight_layout()
+            tag = mode.replace('+', '_')
+            fig.savefig(os.path.join(PLOT_DIR, f'tile_heatmap_{tag}_K{K}.png'), dpi=150)
+            plt.close(fig)
+            print(f"  saved tile_heatmap_{tag}_K{K}.png")
 
 # ============================================================================
 # SIMD plots
@@ -369,13 +509,19 @@ def plot_final_comparison():
         with open(path) as f:
             for line in f:
                 line = line.strip()
-                if not line or line.startswith('HxW') or line.startswith('='):
+                if not line or line.startswith('HxW') or line.startswith('mode') or line.startswith('='):
                     continue
                 parts = line.split()
                 if len(parts) < 7:
                     continue
-                size = int(parts[0].split('x')[0])
-                K = int(parts[1])
+                # Detect new tile format (first field is mode string, not NxN)
+                if 'x' not in parts[0]:
+                    # new format: mode HxW K ...
+                    size = int(parts[1].split('x')[0])
+                    K = int(parts[2])
+                else:
+                    size = int(parts[0].split('x')[0])
+                    K = int(parts[1])
                 if K != K_target:
                     continue
                 if group_field_idx is not None and groups is not None:
@@ -579,13 +725,17 @@ def _get_best_speedups_all_techniques(K_target):
         with open(path) as f:
             for line in f:
                 line = line.strip()
-                if not line or line.startswith('HxW') or line.startswith('='):
+                if not line or line.startswith('HxW') or line.startswith('mode') or line.startswith('='):
                     continue
                 parts = line.split()
                 if len(parts) < 7:
                     continue
-                size = int(parts[0].split('x')[0])
-                k = int(parts[1])
+                if 'x' not in parts[0]:
+                    size = int(parts[1].split('x')[0])
+                    k = int(parts[2])
+                else:
+                    size = int(parts[0].split('x')[0])
+                    k = int(parts[1])
                 if k != K:
                     continue
                 if field_idx is not None and field_values is not None:
