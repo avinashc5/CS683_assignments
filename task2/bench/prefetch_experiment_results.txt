@@ -1,0 +1,35 @@
+# Prefetch experiments for the Task 2 report (2B and 2C analysis material).
+# i5-11400H, pinned taskset -c 3, performance governor. All comparisons were run
+# INTERLEAVED (A/B/A/B back-to-back) so thermal drift affects both variants equally;
+# absolute ms vary with machine temperature between tables, ratios within a table hold.
+
+## Experiment 1 -- software prefetch added to the 2C kernel (6x16 packed micro-kernel)
+# _mm_prefetch on the packed-B stream, 64 floats ahead, T0. optimized stage, 1024^3, ms:
+#   without prefetch : 22.7 / 22.3 / 21.4   (mean ~22.1)
+#   with    prefetch : 23.3 / 22.4 / 23.8   (mean ~23.2)
+# -> 0-5% SLOWER. Packing already makes every inner-loop access unit-stride, so the L2
+#    hardware streamer covers the stream; the extra prefetch instruction is pure cost.
+# Also tried: prefetching the six A broadcast streams as well -> 26.2-31.3 ms (~25%
+# slower): six extra load-port ops + a branch inside a 12-FMA loop crowd out real loads.
+# DECISION: 2C ships without software prefetch; this table is the justification.
+
+## Experiment 2 -- software prefetch added to the 2B kernel (4x2 SIMD, NO cache blocking)
+# _mm_prefetch on the two B streams, 64 floats ahead, T0. simd stage, ms, interleaved:
+#   size    without-pf         with-pf           verdict
+#   128^3   0.047-0.050        0.054-0.058       ~15% slower
+#   256^3   0.380              0.430-0.437       ~13% slower
+#   512^3   2.98-3.01          3.30-3.46         ~12% slower
+#   1024^3  26.3-26.6          28.3-29.5         ~9%  slower
+#   1536^3  132.2/132.5        157.3/127.4       wash (transition point)
+#   2048^3  366-464 (unstable) 326-329 (stable)  ~20% FASTER + variance collapses
+# Prefetching the four A streams as well was worse at every size (35-40 ms @1024^3).
+
+## Reading
+# Software prefetch is a SUBSTITUTE for locality, not an addition to it:
+#  - the blocked+packed 2C kernel has no uncovered misses at any size -> prefetch never
+#    helps there (consistent with the flat 2A distance sweep);
+#  - the unblocked 2B kernel has uncovered DRAM misses only past the cache cliff
+#    (48 MB working set vs 12 MB L3 at 2048^3) -> prefetch helps exactly there and
+#    nowhere else;
+#  - prefetching the broadcast (A) streams always hurts: prefetches compete with real
+#    loads for the same ports.

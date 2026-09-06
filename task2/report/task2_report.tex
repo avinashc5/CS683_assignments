@@ -186,7 +186,71 @@ The combined kernel (\texttt{matmul\_optimized.cpp}) layers three techniques on 
     The packed $B$ panel ($K \times NC$ floats) is reused across all $MC$ rows, and each $A$ sub-panel ($MC \times K$) is reused across all $NC$ columns, so both stay resident in L2.
 \end{enumerate}
 
-\todo{Software prefetch analysis to be updated after Task 2A is re-run with the corrected (non-SIMD) prefetch code.}
+\subsection{Software Prefetch in the Combined Kernel}
+
+The combined kernel deliberately ships \emph{without} software prefetch. This was a
+measured decision, not an omission. We added \texttt{\_mm\_prefetch} on the packed-$B$
+stream (distance and fill level as compile-time knobs, default 64 floats ahead, T0) and
+compared against the identical kernel without it, interleaved back-to-back on a pinned
+core so thermal drift affects both variants equally
+(variants preserved in \texttt{bench/experiments/}):
+
+\begin{table}[H]
+\centering
+\caption{Software prefetch on the combined kernel, \texttt{optimized} stage, $1024^3$ (ms)}
+\begin{tabular}{lrr}
+\toprule
+Variant & Times (interleaved) & Mean \\
+\midrule
+No prefetch                & 22.7 / 22.3 / 21.4 & $\sim$22.1 \\
+$B$-stream prefetch        & 23.3 / 22.4 / 23.8 & $\sim$23.2 \\
+$B$ + all six $A$ streams  & 26.2 -- 31.3       & $\sim$28 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Prefetching is 0--5\% \emph{slower} on the $B$ stream and $\sim$25\% slower when the six
+$A$ broadcast streams are prefetched as well. The mechanism: packing already converts
+every inner-loop access into a unit-stride walk, which the L2 hardware streamer predicts
+perfectly, so the software hint adds no information --- it only spends load-port slots
+that the 12-FMA-per-8-load inner loop cannot spare. This is consistent with the flat
+distance curve in the standalone prefetch stage (Task 2A).
+
+\subsection{Software Prefetch on the Unblocked SIMD Kernel}
+
+To confirm that this null result is a property of the \emph{blocked, packed} kernel and
+not of software prefetch itself, we ran the same experiment on the Stage-1 SIMD kernel,
+which has no cache blocking (prefetch on its two $B$ streams, 64 floats ahead, T0):
+
+\begin{table}[H]
+\centering
+\caption{Prefetch on the unblocked SIMD kernel, \texttt{simd} stage times (ms), interleaved}
+\begin{tabular}{lrrl}
+\toprule
+Size & Without & With & Verdict \\
+\midrule
+$128^3$  & 0.047--0.050 & 0.054--0.058 & $\sim$15\% slower \\
+$256^3$  & 0.380        & 0.430--0.437 & $\sim$13\% slower \\
+$512^3$  & 2.98--3.01   & 3.30--3.46   & $\sim$12\% slower \\
+$1024^3$ & 26.3--26.6   & 28.3--29.5   & $\sim$9\% slower \\
+$1536^3$ & 132.2 / 132.5 & 157.3 / 127.4 & wash (transition) \\
+$2048^3$ & 366--464 (unstable) & \textbf{326--329 (stable)} & $\sim$20\% \textbf{faster} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+While the working set fits in cache, prefetch is pure overhead. Once it exceeds the L3
+(at $2048^3$ three matrices total 48\,MB against a 12\,MB L3), demand misses reach DRAM,
+the hardware prefetcher loses stream history under eviction pressure, and the constant
+software lookahead genuinely hides latency --- $\sim$20\% faster \emph{and} the large
+run-to-run variance collapses. Taken together, the two experiments say: \emph{software
+prefetch is a substitute for locality, not an addition to it}. A kernel that already has
+locality (blocking + packing) gains nothing at any size; a kernel that lacks it gains
+exactly where the hardware gives up.
+
+\todo{Both experiment tables above were measured on the i5-11400H; re-collect on the
+machine the report standardises on (bench/experiments/README.md has the build commands;
+the crossover size scales with that machine's L3 capacity).}
 
 \subsection{Hardware Counter Analysis}
 
