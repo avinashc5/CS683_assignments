@@ -93,22 +93,22 @@ K=3 1.12x faster. The graded shape shows the least benefit because it is memory-
 
 Nothing further to do in code; the autograder's hardware will decide the score.
 
-### Remaining writing — 21 `[TODO:` blocks in `report/task1_report.tex`
+### ~~Remaining writing~~  DONE — report fully written by the team
 
-All the analysis prose. The PDF asks specific questions per subtask:
+`report/task1_report.tex` has zero open TODOs (commits "Report written", "report updated
+with the tiling results"). One optional commented-out note remains at line ~510: a
+suggested discussion of why AVX-512's advantage is size-dependent.
 
-- **1A:** what motivated the changes, what you considered, how effective (and which metric,
-  and why).
-- **1B:** L1-D cache size on this system; naive MPKI; MPKI change naive → tiled with
-  justification; how MPKI varies across matrix and tile sizes in terms of the cache
-  hierarchy and working-set sizes; did you get a speedup, and if not what limits it.
-  *(The honest answer is the 1.42x / rising-MPKI result above — the PDF explicitly invites
-  "if not, analyze the limiting factors", so analyse it rather than hide it.)*
-- **1C:** instruction-count change naive → SIMD with justification; speedup and what
-  contributed; which intrinsics and why. Worth explaining why AVX-512's advantage shrinks
-  at large sizes (memory-bound, and vector width stops mattering).
-- **1D:** the final comparison plot. This now works in your favour — combining beats each
-  technique in isolation, which is exactly the claim the subtask asks you to demonstrate.
+### NEW — tiling re-swept with 4 modes; the compiled-in default is a poor one
+
+`conv_tile.cpp` now supports 4 modes (naive/reordered x column/square tiles) and
+`tile_results.txt` covers all of them. Best at the graded shape (2048² K=3):
+`reorder+sq 8x32` at **1.17x**. But the shipped default (`TILE_MODE=1`, 32x32) measures
+**0.79x** in the team's own sweep and ~0.96x in the graded table — the tile row prints
+*slower than naive*. Score-neutral (tile earns correctness points only), but it invites
+the viva question "why is your tiled version slower than naive?". Consider changing the
+defaults to the sweep's best (`-DTILE_MODE=3 -DTILE_H=8 -DTILE_W=32` equivalents in the
+`#ifndef` defaults) — zero risk, purely presentational.
 
 ### Submission
 
@@ -116,7 +116,19 @@ Per PDF: `rollno1_rollno2_..._pa1.tar.gz`, roll numbers ascending, one member su
 `task1/src/conv_{reorder,unroll,tile,simd,optimized}.cpp` + `task1/task1_report.pdf`,
 PNGs in the top-level `plots/`. Do not modify anything else in `task1/`.
 
-**Deadline: 07/09/2026.** Commits pushed after it are not evaluated.
+**Deadline: 07/09/2026 — TODAY.** Commits pushed after it are not evaluated. The
+tarball (`rollno1_..._pa1.tar.gz`, ascending roll numbers, one member submits) has not
+been built yet.
+
+### Machine standardisation caveat
+
+Task 2's numbers are being re-collected on a teammate's machine. **Task 1 cannot move
+with them wholesale:** its 1C results include real AVX-512 rows, which need this
+i5-11400H — a hybrid (Alder Lake-class) machine has AVX-512 fused off and would report
+the 512-bit variant as unavailable. Either keep all Task 1 numbers from this machine
+(the report's System Configuration already describes it), or re-run only the
+non-AVX-512 parts elsewhere and say so explicitly. Mixed-machine numbers in one table
+need a footnote at minimum.
 
 ---
 
@@ -124,8 +136,18 @@ PNGs in the top-level `plots/`. Do not modify anything else in `task1/`.
 
 **`conv_optimized.cpp` still contains a `CONV_NO_AVX512` environment-variable hook** that
 forces the AVX2 path, added so both dispatch paths could be measured on this machine. It
-only selects a path and never affects correctness. Decide whether to strip it before
-submitting.
+only selects a path and never affects correctness. Strip before the tarball (two lines:
+drop the `getenv` clause and the `#include <cstdlib>`).
+
+**`stash@{0}` holds 6 wording edits to the report that are now STALE** — they were made
+against the 649-line pre-"Report written" tex, and the file has since been heavily
+expanded by the team. Popping it will conflict. Either re-apply the wording by hand to
+the current tex or drop the stash.
+
+**The governor reverts to `powersave` on every reboot.** The latest graded run (70/100,
+optimized 5.89x) was taken under powersave at 73 °C — not comparable to the 8.61x
+cold-machine result. Before any number that matters:
+`sudo sh -c 'cpupower frequency-set -g performance && sysctl kernel.perf_event_paranoid=-1'`
 
 **`src/main.cpp` and `include/timer.h` were modified in earlier commits** (mean-timing
 helper, median reporting). The README says not to modify files outside the five kernels.
