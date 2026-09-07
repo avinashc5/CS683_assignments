@@ -35,7 +35,7 @@ Matrix Multiplication for Inference}
     \item \textbf{L1-D Cache (P-core):} 48 KiB per core, 64-byte lines, 12-way set associative
     \item \textbf{L2 Cache (P-core):} 2 MiB per core, 16-way
     \item \textbf{L3 Cache:} 12 MiB (1 instance, shared), 12-way
-    \item \textbf{Vector ISA:} AVX2 + FMA, AVX-VNNI (no AVX-512)
+    \item \textbf{Vector ISA:} AVX2 + FMA, AVX-VNNI
     \item \textbf{Compiler flags:} \texttt{-std=c++17 -O2 -fno-tree-vectorize -mavx2 -mfma}
     \item \textbf{OS:} Ubuntu 26.04.1 LTS, kernel 7.0.0-31-generic (x86\_64)
     \item \textbf{Pinning:} \texttt{taskset -c 3} (a P-core). On this hybrid CPU,
@@ -247,7 +247,7 @@ After the $K$ loop, each accumulator is horizontally reduced (\texttt{hsum256}) 
 
 Leftover rows ($M \bmod 4$), columns ($N \bmod 2$), and $K$ elements ($K \bmod 8$) fall to a scalar cleanup path.
 
-Two SIMD widths were benchmarked (this CPU does not support AVX-512):
+Two SIMD widths were benchmarked:
 \begin{itemize}[nosep]
     \item \textbf{SSE 128-bit}: 4 floats per vector, $4 \times 2$ register tile, 8 accumulators
     \item \textbf{AVX2 256-bit}: 8 floats per vector, $4 \times 2$ register tile, 8 accumulators

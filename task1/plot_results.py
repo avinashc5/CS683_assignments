@@ -282,11 +282,8 @@ def plot_simd():
             data[K][width_name][size]['naive_insns'] = naive_insns
             data[K][width_name][size]['simd_insns'] = simd_insns
 
-    width_colors = {'SSE_128': 'tab:blue', 'AVX2_256': 'tab:orange',
-                    'AVX512_512': 'tab:green'}
-    # Plot by increasing vector width, not alphabetically ('AVX2_256' would
-    # otherwise sort before 'AVX512_512' before 'SSE_128').
-    width_order = ['SSE_128', 'AVX2_256', 'AVX512_512']
+    width_colors = {'SSE_128': 'tab:blue', 'AVX2_256': 'tab:orange'}
+    width_order = ['SSE_128', 'AVX2_256']
 
     def ordered_widths(k):
         known = [w for w in width_order if w in data[k]]

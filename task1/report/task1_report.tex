@@ -35,7 +35,7 @@
     \item \textbf{L1-D Cache (P-core):} 48 KiB per core, 64-byte lines, 12-way set associative
     \item \textbf{L2 Cache (P-core):} 2 MiB per core, 16-way
     \item \textbf{L3 Cache:} 12 MiB (1 instance, shared), 12-way
-    \item \textbf{Vector ISA:} AVX2 + FMA, AVX-VNNI (no AVX-512)
+    \item \textbf{Vector ISA:} AVX2 + FMA, AVX-VNNI
     \item \textbf{Compiler flags:} \texttt{-std=c++17 -O2 -fno-tree-vectorize -mavx2 -mfma}
     \item \textbf{OS:} Ubuntu 26.04.1 LTS, kernel 7.0.0-31-generic (x86\_64)
     \item \textbf{Pinning:} \texttt{taskset -c 3} (a P-core). On this hybrid CPU,
@@ -513,34 +513,20 @@ The 128-bit SSE implementation vectorizes the inner \texttt{ox} loop, processing
 
 The 256-bit AVX2 implementation follows the same structure as SSE but processes 8 output pixels per iteration using 256-bit registers. The intrinsics used are the \texttt{\_mm256\_*} equivalents: \texttt{\_mm256\_setzero\_ps()} for initialization, \texttt{\_mm256\_set1\_ps()} for kernel weight broadcast, \texttt{\_mm256\_loadu\_ps()} for unaligned 8-float loads, \texttt{\_mm256\_fmadd\_ps()} for fused multiply-add, and \texttt{\_mm256\_storeu\_ps()} for the final store. The only structural difference from the SSE version is the doubled vector width (8 floats vs.\ 4), which halves the number of vector iterations over the output columns. A scalar tail loop handles the remaining $W \bmod 8$ columns.
 
-\subsubsection{512-bit (AVX-512)}
-
-AVX-512 \emph{is} available on the i5-11400H (\texttt{lscpu | grep avx512} reports
-\texttt{avx512f}, \texttt{avx512dq}, \texttt{avx512bw} and \texttt{avx512vl}), so all
-three widths (128-bit SSE, 256-bit AVX2 and 512-bit AVX-512) were measured. The
-512-bit variant processes 16 floats per vector and is compiled with \texttt{-mavx512f};
-the scalar optimisation level is unchanged from the pinned project flags so that only
-the vector width differs between variants.
-
-% [TODO: Discuss the 512-bit results. Note that the speedup is strongly size-dependent:
-%  at K=3 AVX-512 reaches 12.32x at 512x512 but falls to 5.03x at 8192x8192, while at
-%  K=5 it holds 11.5-12.6x across every size. Explain why (working set vs cache, and
-%  the AVX-512 frequency/licence behaviour on this part).]
-
 \subsection{Instruction Count for SIMD Implementations}
 
 \begin{table}[H]
 \centering
 \caption{Instruction counts: naive vs.\ SIMD (K=3)}
-\begin{tabular}{lrrrr}
+\begin{tabular}{lrrr}
 \toprule
-Matrix Size & Naive & SSE 128-bit & AVX2 256-bit & AVX-512 512-bit \\
+Matrix Size & Naive & SSE 128-bit & AVX2 256-bit \\
 \midrule
-512x512     & \naiveInsnsKthreeFtwelve & \simdSSEKthreeFtwelveInsns & \simdAVXKthreeFtwelveInsns & \simdAVXFiveTwelveKthreeFtwelveInsns \\
-1024x1024   & \naiveInsnsKthreeTtwentyfour & \simdSSEKthreeTtwentyfourInsns & \simdAVXKthreeTtwentyfourInsns & \simdAVXFiveTwelveKthreeTtwentyfourInsns \\
-2048x2048   & \naiveInsnsKthreeTfortyeight & \simdSSEKthreeTfortyeightInsns & \simdAVXKthreeTfortyeightInsns & \simdAVXFiveTwelveKthreeTfortyeightInsns \\
-4096x4096   & \naiveInsnsKthreeFninetysix & \simdSSEKthreeFninetysixInsns & \simdAVXKthreeFninetysixInsns & \simdAVXFiveTwelveKthreeFninetysixInsns \\
-8192x8192   & \naiveInsnsKthreeEonetwelve & \simdSSEKthreeEonetwelveInsns & \simdAVXKthreeEonetwelveInsns & \simdAVXFiveTwelveKthreeEonetwelveInsns \\
+512x512     & \naiveInsnsKthreeFtwelve & \simdSSEKthreeFtwelveInsns & \simdAVXKthreeFtwelveInsns \\
+1024x1024   & \naiveInsnsKthreeTtwentyfour & \simdSSEKthreeTtwentyfourInsns & \simdAVXKthreeTtwentyfourInsns \\
+2048x2048   & \naiveInsnsKthreeTfortyeight & \simdSSEKthreeTfortyeightInsns & \simdAVXKthreeTfortyeightInsns \\
+4096x4096   & \naiveInsnsKthreeFninetysix & \simdSSEKthreeFninetysixInsns & \simdAVXKthreeFninetysixInsns \\
+8192x8192   & \naiveInsnsKthreeEonetwelve & \simdSSEKthreeEonetwelveInsns & \simdAVXKthreeEonetwelveInsns \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -548,15 +534,15 @@ Matrix Size & Naive & SSE 128-bit & AVX2 256-bit & AVX-512 512-bit \\
 \begin{table}[H]
 \centering
 \caption{Instruction counts: naive vs.\ SIMD (K=5)}
-\begin{tabular}{lrrrr}
+\begin{tabular}{lrrr}
 \toprule
-Matrix Size & Naive & SSE 128-bit & AVX2 256-bit & AVX-512 512-bit \\
+Matrix Size & Naive & SSE 128-bit & AVX2 256-bit \\
 \midrule
-512x512     & \naiveInsnsKfiveFtwelve & \simdSSEKfiveFtwelveInsns & \simdAVXKfiveFtwelveInsns & \simdAVXFiveTwelveKfiveFtwelveInsns \\
-1024x1024   & \naiveInsnsKfiveTtwentyfour & \simdSSEKfiveTtwentyfourInsns & \simdAVXKfiveTtwentyfourInsns & \simdAVXFiveTwelveKfiveTtwentyfourInsns \\
-2048x2048   & \naiveInsnsKfiveTfortyeight & \simdSSEKfiveTfortyeightInsns & \simdAVXKfiveTfortyeightInsns & \simdAVXFiveTwelveKfiveTfortyeightInsns \\
-4096x4096   & \naiveInsnsKfiveFninetysix & \simdSSEKfiveFninetysixInsns & \simdAVXKfiveFninetysixInsns & \simdAVXFiveTwelveKfiveFninetysixInsns \\
-8192x8192   & \naiveInsnsKfiveEonetwelve & \simdSSEKfiveEonetwelveInsns & \simdAVXKfiveEonetwelveInsns & \simdAVXFiveTwelveKfiveEonetwelveInsns \\
+512x512     & \naiveInsnsKfiveFtwelve & \simdSSEKfiveFtwelveInsns & \simdAVXKfiveFtwelveInsns \\
+1024x1024   & \naiveInsnsKfiveTtwentyfour & \simdSSEKfiveTtwentyfourInsns & \simdAVXKfiveTtwentyfourInsns \\
+2048x2048   & \naiveInsnsKfiveTfortyeight & \simdSSEKfiveTfortyeightInsns & \simdAVXKfiveTfortyeightInsns \\
+4096x4096   & \naiveInsnsKfiveFninetysix & \simdSSEKfiveFninetysixInsns & \simdAVXKfiveFninetysixInsns \\
+8192x8192   & \naiveInsnsKfiveEonetwelve & \simdSSEKfiveEonetwelveInsns & \simdAVXKfiveEonetwelveInsns \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -566,15 +552,15 @@ Matrix Size & Naive & SSE 128-bit & AVX2 256-bit & AVX-512 512-bit \\
 \begin{table}[H]
 \centering
 \caption{SIMD speedups over naive (K=3)}
-\begin{tabular}{lrrr}
+\begin{tabular}{lrr}
 \toprule
-Matrix Size & SSE 128-bit & AVX2 256-bit & AVX-512 512-bit \\
+Matrix Size & SSE 128-bit & AVX2 256-bit \\
 \midrule
-512x512     & \simdSSEKthreeFtwelveSpeedup & \simdAVXKthreeFtwelveSpeedup & \simdAVXFiveTwelveKthreeFtwelveSpeedup \\
-1024x1024   & \simdSSEKthreeTtwentyfourSpeedup & \simdAVXKthreeTtwentyfourSpeedup & \simdAVXFiveTwelveKthreeTtwentyfourSpeedup \\
-2048x2048   & \simdSSEKthreeTfortyeightSpeedup & \simdAVXKthreeTfortyeightSpeedup & \simdAVXFiveTwelveKthreeTfortyeightSpeedup \\
-4096x4096   & \simdSSEKthreeFninetysixSpeedup & \simdAVXKthreeFninetysixSpeedup & \simdAVXFiveTwelveKthreeFninetysixSpeedup \\
-8192x8192   & \simdSSEKthreeEonetwelveSpeedup & \simdAVXKthreeEonetwelveSpeedup & \simdAVXFiveTwelveKthreeEonetwelveSpeedup \\
+512x512     & \simdSSEKthreeFtwelveSpeedup & \simdAVXKthreeFtwelveSpeedup \\
+1024x1024   & \simdSSEKthreeTtwentyfourSpeedup & \simdAVXKthreeTtwentyfourSpeedup \\
+2048x2048   & \simdSSEKthreeTfortyeightSpeedup & \simdAVXKthreeTfortyeightSpeedup \\
+4096x4096   & \simdSSEKthreeFninetysixSpeedup & \simdAVXKthreeFninetysixSpeedup \\
+8192x8192   & \simdSSEKthreeEonetwelveSpeedup & \simdAVXKthreeEonetwelveSpeedup \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -582,15 +568,15 @@ Matrix Size & SSE 128-bit & AVX2 256-bit & AVX-512 512-bit \\
 \begin{table}[H]
 \centering
 \caption{SIMD speedups over naive (K=5)}
-\begin{tabular}{lrrr}
+\begin{tabular}{lrr}
 \toprule
-Matrix Size & SSE 128-bit & AVX2 256-bit & AVX-512 512-bit \\
+Matrix Size & SSE 128-bit & AVX2 256-bit \\
 \midrule
-512x512     & \simdSSEKfiveFtwelveSpeedup & \simdAVXKfiveFtwelveSpeedup & \simdAVXFiveTwelveKfiveFtwelveSpeedup \\
-1024x1024   & \simdSSEKfiveTtwentyfourSpeedup & \simdAVXKfiveTtwentyfourSpeedup & \simdAVXFiveTwelveKfiveTtwentyfourSpeedup \\
-2048x2048   & \simdSSEKfiveTfortyeightSpeedup & \simdAVXKfiveTfortyeightSpeedup & \simdAVXFiveTwelveKfiveTfortyeightSpeedup \\
-4096x4096   & \simdSSEKfiveFninetysixSpeedup & \simdAVXKfiveFninetysixSpeedup & \simdAVXFiveTwelveKfiveFninetysixSpeedup \\
-8192x8192   & \simdSSEKfiveEonetwelveSpeedup & \simdAVXKfiveEonetwelveSpeedup & \simdAVXFiveTwelveKfiveEonetwelveSpeedup \\
+512x512     & \simdSSEKfiveFtwelveSpeedup & \simdAVXKfiveFtwelveSpeedup \\
+1024x1024   & \simdSSEKfiveTtwentyfourSpeedup & \simdAVXKfiveTtwentyfourSpeedup \\
+2048x2048   & \simdSSEKfiveTfortyeightSpeedup & \simdAVXKfiveTfortyeightSpeedup \\
+4096x4096   & \simdSSEKfiveFninetysixSpeedup & \simdAVXKfiveFninetysixSpeedup \\
+8192x8192   & \simdSSEKfiveEonetwelveSpeedup & \simdAVXKfiveEonetwelveSpeedup \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -613,26 +599,26 @@ Matrix Size & SSE 128-bit & AVX2 256-bit & AVX-512 512-bit \\
 
 \subsubsection{Q1: Change in Instruction Count from Naive to SIMD}
 
-The instruction count \emph{increases} when moving from naive to SIMD, by roughly 19\% for SSE, 10\% for AVX2, and 5\% for AVX-512.
+The instruction count \emph{increases} when moving from naive to SIMD, by roughly 19\% for SSE and 10\% for AVX2.
 This is the opposite of the na\"ive expectation that vectorising $N$ operations into one vector instruction should reduce the count by $N\times$.
 The reason is that the compiler already generates efficient scalar code under \texttt{-O2}: the naive inner loop compiles to a tight sequence of scalar loads, multiplies, and adds.
 The SIMD versions replace those scalar arithmetic instructions with fewer vector instructions, but add overhead that the scalar version does not have: broadcast instructions (\texttt{set1}), explicit vector loads and stores, and loop setup for the vector width.
 At small $K$ ($K{=}3$, only 9 kernel positions), this overhead is a significant fraction of the total work per output pixel.
-The reduction is closer to the vector width ratio at larger $K$: for AVX-512 at $K{=}5$ the increase is only 5\%, because the 25 kernel positions amortise the per-pixel overhead better.
+The overhead fraction shrinks at larger $K$: for AVX2 at $K{=}5$ the increase is only ${\sim}10\%$, because the 25 kernel positions amortise the per-pixel overhead better.
 
 \subsubsection{Q2: Speedup Analysis}
 
-Despite the higher instruction count, SIMD achieves large speedups: SSE gives ${\sim}4.5\text{--}5.1\times$, AVX2 ${\sim}6.6\text{--}10.1\times$, and AVX-512 ${\sim}7.0\text{--}12.5\times$.
+Despite the higher instruction count, SIMD achieves large speedups: SSE gives ${\sim}4.0\text{--}4.8\times$ and AVX2 ${\sim}6.2\text{--}9.0\times$.
 The speedup comes from \emph{throughput}, not instruction count.
-Each vector FMA processes 4/8/16 multiply-adds in a single instruction that has roughly the same latency and throughput as one scalar FMA.
-So while the total instruction count is similar, the amount of useful work per instruction is $4\text{--}16\times$ higher.
+Each vector FMA processes 4/8 multiply-adds in a single instruction that has roughly the same latency and throughput as one scalar FMA.
+So while the total instruction count is similar, the amount of useful work per instruction is $4\text{--}8\times$ higher.
 
-For $K{=}5$, speedups are more stable across matrix sizes (e.g.\ AVX-512: $11.5\text{--}12.5\times$) because the larger kernel makes the computation more compute-bound, keeping the vector units fully utilised.
-For $K{=}3$, speedups drop at larger sizes (e.g.\ AVX-512: $12.0\times$ at $512{\times}512$ down to $7.0\times$ at $8192{\times}8192$) as memory bandwidth starts to limit throughput: the smaller kernel does less work per input byte fetched.
+For $K{=}5$, speedups are more stable across matrix sizes because the larger kernel makes the computation more compute-bound, keeping the vector units fully utilised.
+For $K{=}3$, speedups drop at larger sizes (e.g.\ AVX2: from ${\sim}9\times$ at $512{\times}512$ down to ${\sim}6.8\times$ at $8192{\times}8192$) as memory bandwidth starts to limit throughput: the smaller kernel does less work per input byte fetched.
 
 \subsubsection{Q3: Choice of SIMD Intrinsics}
 
-Four intrinsics form the core of each SIMD width (shown for AVX2; SSE and AVX-512 use the corresponding \texttt{\_mm\_*} and \texttt{\_mm512\_*} variants):
+Four intrinsics form the core of each SIMD width (shown for AVX2; SSE uses the corresponding \texttt{\_mm\_*} variants):
 \begin{itemize}
     \item \texttt{\_mm256\_loadu\_ps}: unaligned load of 8 floats from the input. Unaligned because the starting column \texttt{ox + kx} is not guaranteed to be 32-byte aligned.
     \item \texttt{\_mm256\_set1\_ps}: broadcasts one kernel weight to all 8 lanes, so the same weight multiplies 8 adjacent input values in parallel.
@@ -646,19 +632,19 @@ Four intrinsics form the core of each SIMD width (shown for AVX2; SSE and AVX-51
 
 \subsection{Combined Optimized Implementation}
 
-The combined implementation in \texttt{conv\_optimized.cpp} uses \textbf{SIMD + output-column unrolling} with the \textbf{naive loop order} and \textbf{runtime dispatch} between AVX2 and AVX-512.
+The combined implementation in \texttt{conv\_optimized.cpp} uses \textbf{AVX2 SIMD + output-column unrolling} with the \textbf{naive loop order}.
 
 \textbf{Techniques combined:}
 \begin{itemize}
-    \item \textbf{Widest available SIMD.} AVX-512 (16 floats per vector) is used when the CPU supports it; otherwise AVX2 (8 floats). The dispatch is resolved once at startup via \texttt{\_\_builtin\_cpu\_supports("avx512f")}.
-    \item \textbf{Multi-accumulator unrolling.} Instead of one vector accumulator per iteration, 4 or 8 independent accumulators process 32--128 output columns per block (e.g.\ 8 accumulators $\times$ 16 floats = 128 columns for AVX-512). This breaks the FMA dependency chain, the same mechanism that made \texttt{unroll\_ox} the best scalar strategy.
+    \item \textbf{AVX2 SIMD.} Each vector instruction processes 8 floats via 256-bit FMA.
+    \item \textbf{Multi-accumulator unrolling.} Instead of one vector accumulator per iteration, 4 independent accumulators process 32 output columns per block (4 accumulators $\times$ 8 floats). This breaks the FMA dependency chain, the same mechanism that made \texttt{unroll\_ox} the best scalar strategy.
     \item \textbf{Naive loop order retained.} The per-stage sweeps showed that the reordered loop order is a net loss at large sizes due to multi-pass cache pressure. The naive order (\texttt{oy, ox, ky, kx}) keeps the working set small and avoids the zeroing and read-modify-write overhead.
     \item \textbf{Tiling omitted.} The tiling sweep showed only $1.2\text{--}1.4\times$ improvement and actually increased L1 MPKI. Since the naive order already has good cache behaviour, tiling adds overhead without meaningful benefit.
 \end{itemize}
 
 These two techniques, SIMD and multi-accumulator unrolling, complement each other because they address different bottlenecks.
-SIMD increases the work per instruction (4--16 multiply-adds instead of 1), while multiple accumulators increase the work per cycle by letting the out-of-order core pipeline independent FMA chains.
-The combination multiplies: SIMD alone (single accumulator) gives ${\sim}7\text{--}12\times$, and adding 4--8 accumulators on top roughly doubles the throughput again at small sizes.
+SIMD increases the work per instruction (4--8 multiply-adds instead of 1), while multiple accumulators increase the work per cycle by letting the out-of-order core pipeline independent FMA chains.
+The combination multiplies: SIMD alone (single accumulator) gives ${\sim}4\text{--}9\times$, and adding 4 accumulators on top roughly doubles the throughput again at small sizes.
 
 \subsection{Speedup Results}
 
@@ -702,8 +688,8 @@ Combining them removes both limits simultaneously: each FMA operates on a full v
 This is a multiplicative effect, which is why the combined optimized version ($20\text{--}25\times$ at small sizes) far exceeds what either technique achieves alone (SIMD alone: ${\sim}12\times$, unroll alone: ${\sim}3\times$).
 
 \textbf{Best combination.}
-AVX-512 with 8 independent accumulators (128 output columns per block) gives the highest peak speedup: $24.75\times$ at $512{\times}512$ for $K{=}5$.
-For $K{=}3$ the peak is $20.85\times$ at $512{\times}512$.
+AVX2 with 4 independent accumulators (32 output columns per block) gives the highest peak speedup at $512{\times}512$ for both kernel sizes.
+The gain is largest for $K{=}5$ due to the higher arithmetic intensity ($2 \times 5^{2} = 50$ flops per pixel).
 
 \textbf{Bottleneck of the best implementation.}
 At small matrix sizes the implementation is compute-bound: the data fits in cache and the FMA units are the limiter.

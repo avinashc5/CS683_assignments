@@ -5,8 +5,8 @@ cd "$(dirname "$0")"
 
 SIZES=(512 1024 2048 4096 8192)
 KERNELS=(3 5)
-ALL_WIDTHS=(128 256 512)
-ALL_WIDTH_NAMES=("SSE_128" "AVX2_256" "AVX512_512")
+ALL_WIDTHS=(128 256)
+ALL_WIDTH_NAMES=("SSE_128" "AVX2_256")
 SRC=src/conv_simd.cpp
 OUT=simd_results.txt
 
@@ -15,7 +15,6 @@ usage() {
     echo ""
     echo "  width: 128 = SSE     (4 floats per vector)"
     echo "         256 = AVX2    (8 floats per vector)"
-    echo "         512 = AVX-512 (16 floats per vector)"
     echo "         (omit to run all widths)"
     exit 0
 }
@@ -46,8 +45,7 @@ if [[ -n "${1:-}" ]]; then
     case "$1" in
         128) WIDTHS=(128); WIDTH_NAMES=("SSE_128")    ;;
         256) WIDTHS=(256); WIDTH_NAMES=("AVX2_256")   ;;
-        512) WIDTHS=(512); WIDTH_NAMES=("AVX512_512") ;;
-        *)   echo "Error: width must be 128, 256, or 512"; exit 1 ;;
+        *)   echo "Error: width must be 128 or 256"; exit 1 ;;
     esac
 else
     WIDTHS=("${ALL_WIDTHS[@]}")

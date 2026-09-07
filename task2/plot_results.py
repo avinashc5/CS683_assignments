@@ -72,8 +72,10 @@ def plot_simd_width():
 
     sizes = sorted(data.keys())
     size_labels = [str(s) for s in sizes]
-    widths = ['SSE 128-bit', 'AVX2 256-bit', 'AVX-512 512-bit']
+    all_widths = ['SSE 128-bit', 'AVX2 256-bit', 'AVX-512 512-bit']
     colors = {'SSE 128-bit': 'tab:green', 'AVX2 256-bit': 'tab:blue', 'AVX-512 512-bit': 'tab:red'}
+    # Only include widths that have actual data (not all n/a)
+    widths = [w for w in all_widths if any(data[s].get(w, {}).get('gflops') for s in sizes)]
 
     # Speedup plot
     fig, ax = plt.subplots(figsize=(9, 5.5))
