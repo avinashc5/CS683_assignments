@@ -93,14 +93,12 @@ if os.path.exists(path):
                     defcmd(f'simdWidth{wkey}{sk}Insns', fmt_insns(parse_float(insns_s)))
 
 # ============================================================================
-# Size sweep results (simd / prefetch / optimized)
+# Optimized sweep results (SIMD + blocking kernel across sizes)
 # ============================================================================
-STAGE_KEYS = {'simd': 'Simd', 'prefetch': 'Prefetch', 'optimized': 'Optimized'}
-
-path = os.path.join(BASE, 'bench', 'size_sweep_results.txt')
+path = os.path.join(BASE, 'bench', 'optimized_sweep_results.txt')
 if os.path.exists(path):
     lines.append('')
-    lines.append('% === Size sweep: simd / prefetch / optimized ===')
+    lines.append('% === Optimized (SIMD + blocking) sweep ===')
     with open(path) as f:
         for line in f:
             line = line.strip()
@@ -110,17 +108,16 @@ if os.path.exists(path):
             if len(parts) < 5:
                 continue
             size = int(parts[0].split('x')[0])
-            stage = parts[1]
-            if size in SIZE_KEYS and stage in STAGE_KEYS:
+            if size in SIZE_KEYS:
                 sk = SIZE_KEYS[size]
-                stk = STAGE_KEYS[stage]
-                defcmd(f'sweep{stk}{sk}NaiveGflops', fmt_float(parse_float(parts[2])))
-                defcmd(f'sweep{stk}{sk}Gflops', fmt_float(parse_float(parts[3])))
-                defcmd(f'sweep{stk}{sk}Speedup', parse_speedup(parts[4]))
+                defcmd(f'optSweep{sk}Gflops', fmt_float(parse_float(parts[3])))
+                defcmd(f'optSweep{sk}Speedup', parse_speedup(parts[4]))
 
 # ============================================================================
 # Perf stage results (hardware counters at 1024)
 # ============================================================================
+PERF_STAGE_KEYS = {'simd': 'Simd', 'prefetch': 'Prefetch', 'optimized': 'Optimized'}
+
 path = os.path.join(BASE, 'bench', 'perf_stage_results.txt')
 if os.path.exists(path):
     lines.append('')
@@ -136,13 +133,53 @@ if os.path.exists(path):
             stage, cache = parts[0], parts[1]
             if cache != 'cold':
                 continue
-            if stage in STAGE_KEYS or stage == 'naive':
-                stk = STAGE_KEYS.get(stage, 'Naive')
+            if stage in PERF_STAGE_KEYS or stage == 'naive':
+                stk = PERF_STAGE_KEYS.get(stage, 'Naive')
                 defcmd(f'perf{stk}Insns', fmt_insns(parse_float(parts[2])))
                 defcmd(f'perf{stk}LoneDmiss', fmt_insns(parse_float(parts[3])))
                 defcmd(f'perf{stk}LtwoMiss', fmt_insns(parse_float(parts[4])))
                 defcmd(f'perf{stk}LLCmiss', fmt_insns(parse_float(parts[5])))
                 defcmd(f'perf{stk}IPC', fmt_float(parse_float(parts[6])))
+
+# ============================================================================
+# Prefetch sweep results
+# ============================================================================
+MODE_PF_KEYS = {'none': 'None', 'within_row': 'WithinRow', 'next_B': 'NextB',
+                'C_output': 'COutput', 'all': 'All'}
+HINT_KEYS_PF = {'T0': 'Tzero', 'T1': 'Tone', 'T2': 'Ttwo', 'NTA': 'NTA', '--': 'NA'}
+DIST_KEYS = {0: 'Dzero', 16: 'Dsixteen', 32: 'Dthirtytwo', 64: 'Dsixtyfour', 128: 'Donetwentyeight'}
+
+path = os.path.join(BASE, 'bench', 'prefetch_sweep_results.txt')
+if os.path.exists(path):
+    lines.append('')
+    lines.append('% === Prefetch sweep ===')
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith('size') or line.startswith('='):
+                continue
+            parts = line.split()
+            if len(parts) < 11:
+                continue
+            size = int(parts[0].split('x')[0])
+            mode, hint, dist_s = parts[1], parts[2], parts[3]
+            dist = int(dist_s) if dist_s != '--' else -1
+
+            mk = MODE_PF_KEYS.get(mode)
+            hk = HINT_KEYS_PF.get(hint)
+            dk = DIST_KEYS.get(dist, f'D{dist}' if dist >= 0 else 'DNA')
+            sk = SIZE_KEYS.get(size)
+            if not all([mk, hk, sk]):
+                continue
+
+            prefix = f'pf{mk}{hk}{dk}{sk}'
+            defcmd(f'{prefix}Speedup', parse_speedup(parts[6]))
+            defcmd(f'{prefix}Gflops', fmt_float(parse_float(parts[5])))
+            defcmd(f'{prefix}NaiveGflops', fmt_float(parse_float(parts[4])))
+            defcmd(f'{prefix}LoneDmiss', fmt_insns(parse_float(parts[7])))
+            defcmd(f'{prefix}LtwoMiss', fmt_insns(parse_float(parts[8])))
+            defcmd(f'{prefix}LLCmiss', fmt_insns(parse_float(parts[9])))
+            defcmd(f'{prefix}SwPfAcc', fmt_insns(parse_float(parts[10])))
 
 # ============================================================================
 lines.append('')

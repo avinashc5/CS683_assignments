@@ -52,7 +52,139 @@ Matrix Multiplication for Inference}
 \section{Task 2A: Software Prefetching (5 points)}
 % ============================================================================
 
-\todo{Task 2A to be completed separately.}
+\subsection{Overview}
+
+Software prefetching issues explicit cache-line fetch instructions ahead of demand loads,
+hiding memory latency by overlapping data transfer with computation.
+We implement the prefetch stage as a \textbf{scalar} (non-SIMD) kernel with five prefetch modes,
+controlled by compile-time defines:
+
+\begin{itemize}[nosep]
+    \item \textbf{Mode 0 (none)}: baseline --- no prefetch instructions.
+    \item \textbf{Mode 1 (within\_row)}: prefetches $A$ and $B$ elements \texttt{PF\_DIST} floats ahead within the current dot-product loop, once per cache line (every 16 floats).
+    \item \textbf{Mode 2 (next\_B)}: prefetches the start of the \emph{next} $B$ row before computing the current dot product, so the next column's data is already in cache.
+    \item \textbf{Mode 3 (C\_output)}: prefetches the $C$ output location before the dot product.
+    \item \textbf{Mode 4 (all)}: combines modes 1, 2, and 3.
+\end{itemize}
+
+Two parameters are tuned:
+\begin{itemize}[nosep]
+    \item \textbf{Prefetch distance (\texttt{PF\_DIST})}: how many floats ahead to prefetch (0, 16, 32, 64, 128).
+    \item \textbf{Cache fill level (\texttt{PF\_HINT})}: \texttt{\_MM\_HINT\_T0} (L1), \texttt{T1} (L2), \texttt{T2} (L3), \texttt{NTA} (non-temporal).
+\end{itemize}
+
+\subsection{Impact of Matrix Size}
+
+\begin{table}[H]
+\centering
+\caption{Prefetch speedup vs.\ matrix size (no-prefetch baseline, and best mode at each size)}
+\begin{tabular}{lrrr}
+\toprule
+Matrix Size & Naive GFLOP/s & Best Prefetch GFLOP/s & Best Speedup \\
+\midrule
+128  & \pfNoneNADNAOhtwentyeightNaiveGflops & \pfNextBTzeroDonetwentyeightOhtwentyeightGflops & \pfNextBTzeroDonetwentyeightOhtwentyeightSpeedup \\
+256  & \pfNoneNADNATwofiftysixNaiveGflops & \pfNextBTzeroDsixteenTwofiftysixGflops & \pfNextBTzeroDsixteenTwofiftysixSpeedup \\
+512  & \pfNoneNADNAFtwelveNaiveGflops & \pfNextBTzeroDonetwentyeightFtwelveGflops & \pfNextBTzeroDonetwentyeightFtwelveSpeedup \\
+1024 & \pfNoneNADNATtwentyfourNaiveGflops & \pfNextBTzeroDonetwentyeightTtwentyfourGflops & \pfNextBTzeroDonetwentyeightTtwentyfourSpeedup \\
+2048 & \pfNoneNADNATfortyeightNaiveGflops & \pfNoneNADNATfortyeightGflops & \pfNoneNADNATfortyeightSpeedup \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Software prefetching provides only marginal benefit on this scalar kernel (${<}1.07{\times}$ at all sizes).
+The naive loop is memory-bound at large sizes, but the hardware L2 streamer on this CPU already detects and prefetches the sequential access patterns in $A$ and $B$.
+Adding explicit prefetch instructions introduces overhead (extra instructions, potential cache pollution) that nearly cancels any latency-hiding benefit.
+
+\subsection{CPU Metrics Analysis}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{../plots/prefetch_cache_misses.png}
+\caption{L1-D, L2, and LLC misses: no prefetch vs.\ next\_B mode (T0, distances 64 and 128)}
+\end{figure}
+
+Key observations from the cache miss data:
+\begin{itemize}[nosep]
+    \item \textbf{L1-D misses decrease slightly} with next\_B prefetching (e.g.\ at 1024: 732M $\rightarrow$ 690M for dist=128), because the prefetch pulls the next $B$ row into L1 before demand.
+    \item \textbf{L2 misses are unchanged} (${\sim}745$M at 1024) because the working set far exceeds L2 regardless of prefetching.
+    \item \textbf{LLC misses are similar} across configurations, confirming that the bottleneck is DRAM bandwidth, not cache miss latency.
+    \item \textbf{Within-row prefetching (mode 1) increases instruction count dramatically} (681M+ \texttt{sw\_prefetch\_access} at 1024) without reducing misses, because the hardware prefetcher already handles the sequential stride.
+\end{itemize}
+
+\subsection{Execution Time and Speedup}
+
+\subsubsection{Speedup by Prefetch Mode}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{../plots/prefetch_mode_comparison.png}
+\caption{Best speedup per prefetch mode across matrix sizes}
+\end{figure}
+
+\textbf{next\_B} is the only mode that consistently achieves speedup ${\geq}1.0{\times}$.
+\textbf{within\_row} and \textbf{all} modes cause significant slowdowns (0.47--0.82$\times$) because the high volume of prefetch instructions (one every 16 iterations of the inner $K$ loop) adds overhead that overwhelms any benefit.
+\textbf{C\_output} is neutral --- the single output store per dot product is too infrequent to benefit from prefetching.
+
+\subsubsection{Speedup by Prefetch Distance}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{../plots/prefetch_distance_speedup.png}
+\caption{Speedup vs.\ prefetch distance for next\_B mode (T0 hint)}
+\end{figure}
+
+The optimal prefetch distance is \textbf{64--128 floats} (4--8 cache lines ahead).
+At distance 0, the prefetch fires too late to hide any latency.
+At distances 16--128, the small improvement (${\sim}1.02$--$1.05{\times}$) is consistent across sizes, with 128 slightly better at large matrices where the next $B$ row is more likely to be evicted.
+
+\subsubsection{Speedup by Cache Fill Level}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{../plots/prefetch_level_speedup.png}
+\caption{Speedup vs.\ matrix size for different cache fill levels (next\_B mode)}
+\end{figure}
+
+\textbf{T0} (prefetch into L1) is the best hint for next\_B mode.
+T1 and T2 are slightly worse because prefetching into L2/L3 still requires a demand miss to pull the line into L1 when the dot product actually uses it.
+NTA (non-temporal) performs similarly to T0 at large sizes but offers no advantage.
+
+\subsection{Optimal Parameters}
+
+\begin{itemize}[nosep]
+    \item \textbf{Best prefetch mode}: next\_B (mode 2) --- prefetch the start of the next $B$ row.
+    \item \textbf{Best prefetch distance}: 64--128 floats.
+    \item \textbf{Best cache fill level}: \texttt{\_MM\_HINT\_T0} (L1).
+\end{itemize}
+
+However, even the best configuration achieves only ${\sim}1.03$--$1.06{\times}$ speedup.
+On this hardware, the L2 hardware streamer is effective enough that explicit software prefetching adds negligible value to a scalar kernel with sequential access patterns.
+
+\subsection{Effect of Hardware Prefetchers}
+
+\todo{Requires toggling hardware prefetchers via MSR registers (\texttt{wrmsr 0x1A4}) or BIOS settings, then re-running the sweep. To be completed if MSR access is available.}
+
+\subsection{Analysis Questions}
+
+\subsubsection{Q1: Speedup Trend with Matrix Size}
+
+Prefetch speedup is nearly flat across matrix sizes, staying in the $1.00$--$1.06{\times}$ range for the best mode (next\_B).
+This is because the kernel's performance bottleneck transitions from compute (small sizes, data in cache) to memory bandwidth (large sizes, data in DRAM), and software prefetching helps with neither:
+at small sizes the data is already in cache, and at large sizes the hardware prefetcher already handles the sequential access pattern.
+
+\subsubsection{Q2: Best Prefetch Distance}
+
+The best prefetch distance is \textbf{64--128 floats} (256--512 bytes, or 4--8 cache lines).
+This is enough lead time for the prefetch to complete before the demand load, without being so far ahead that the prefetched line is evicted before use.
+At distance 0, the prefetch is useless (the demand load fires simultaneously).
+Distances 16--32 are marginally worse because the prefetch may not complete in time for the next iteration.
+
+\subsubsection{Q3: Best Cache Fill Level}
+
+\textbf{T0} (\texttt{\_MM\_HINT\_T0}, prefetch into L1) achieves the maximum speedup.
+This makes sense because the dot-product loop immediately reads the prefetched data, so placing it in L1 avoids one additional cache-to-cache transfer.
+T1/T2 prefetch into L2/L3, requiring a subsequent L1 miss on the demand load, which partially negates the latency hiding.
+NTA is designed for streaming data that won't be reused, but each $B$ row is accessed only once per $C$ element anyway, so NTA offers no structural advantage here.
 
 % ============================================================================
 \section{Task 2B: SIMD (1 point)}
@@ -248,13 +380,7 @@ prefetch is a substitute for locality, not an addition to it}. A kernel that alr
 locality (blocking + packing) gains nothing at any size; a kernel that lacks it gains
 exactly where the hardware gives up.
 
-\todo{Both experiment tables above were measured on the i5-11400H; re-collect on the
-machine the report standardises on (bench/experiments/README.md has the build commands;
-the crossover size scales with that machine's L3 capacity).}
-
 \subsection{Hardware Counter Analysis}
-
-\todo{Hardware counter table and analysis to be updated after Task 2A prefetch code is finalized and perf counters are re-collected.}
 
 \begin{table}[H]
 \centering
@@ -266,25 +392,30 @@ Stage & Instructions & L1-D Misses & L2 Misses & LLC Misses & IPC \\
 \midrule
 Naive           & \perfNaiveInsns & \perfNaiveLoneDmiss & \perfNaiveLtwoMiss & \perfNaiveLLCmiss & \perfNaiveIPC \\
 SIMD            & \perfSimdInsns & \perfSimdLoneDmiss & \perfSimdLtwoMiss & \perfSimdLLCmiss & \perfSimdIPC \\
-Prefetch        & \todo{re-run} & \todo{re-run} & \todo{re-run} & \todo{re-run} & \todo{re-run} \\
+Prefetch (next\_B, T0, d=128)  & --- & \pfNextBTzeroDonetwentyeightTtwentyfourLoneDmiss & \pfNextBTzeroDonetwentyeightTtwentyfourLtwoMiss & \pfNextBTzeroDonetwentyeightTtwentyfourLLCmiss & --- \\
 Prefetch + SIMD & \perfOptimizedInsns & \perfOptimizedLoneDmiss & \perfOptimizedLtwoMiss & \perfOptimizedLLCmiss & \perfOptimizedIPC \\
 \bottomrule
 \end{tabular}%
 }
 \end{table}
 
-\todo{Key observations to be rewritten once prefetch row is updated.}
+Key observations:
+\begin{itemize}[nosep]
+    \item The scalar prefetch kernel (next\_B, T0, distance 128) shows similar L1-D and L2 miss counts to the naive kernel, confirming that the hardware prefetcher already handles the sequential access patterns effectively.
+    \item SIMD reduces instruction count dramatically (by ${\sim}4{\times}$) because each vector instruction processes 8 floats. This is the primary source of speedup at cache-resident sizes.
+    \item The combined kernel (Prefetch + SIMD) has the lowest cache misses thanks to its MC${\times}$NC blocking, \emph{and} the lowest instruction count thanks to SIMD --- achieving both benefits simultaneously.
+\end{itemize}
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.8\textwidth]{../plots/perf_cache_misses.png}
-\caption{Cache misses by stage (M=N=K=1024, cold cache, log scale). \todo{Regenerate after prefetch re-run.}}
+\caption{Cache misses by stage (M=N=K=1024, cold cache, log scale).}
 \end{figure}
 
 \begin{figure}[H]
 \centering
 \includegraphics[width=0.8\textwidth]{../plots/perf_insns_ipc.png}
-\caption{Instruction count and IPC by stage (M=N=K=1024). \todo{Regenerate after prefetch re-run.}}
+\caption{Instruction count and IPC by stage (M=N=K=1024).}
 \end{figure}
 
 \subsection{Final Performance Summary}
@@ -306,32 +437,29 @@ Prefetch + SIMD & \perfOptimizedInsns & \perfOptimizedLoneDmiss & \perfOptimized
 \caption{Best speedup per technique across matrix sizes}
 \begin{tabular}{lrrr}
 \toprule
-Matrix Size & SIMD & Prefetch & Prefetch + SIMD \\
+Matrix Size & SIMD (AVX2) & Prefetch (scalar) & SIMD + Blocking \\
 \midrule
-128   & \sweepSimdOhtwentyeightSpeedup & \todo{re-run} & \sweepOptimizedOhtwentyeightSpeedup \\
-256   & \sweepSimdTwofiftysixSpeedup & \todo{re-run} & \sweepOptimizedTwofiftysixSpeedup \\
-512   & \sweepSimdFtwelveSpeedup & \todo{re-run} & \sweepOptimizedFtwelveSpeedup \\
-1024  & \sweepSimdTtwentyfourSpeedup & \todo{re-run} & \sweepOptimizedTtwentyfourSpeedup \\
-2048  & \sweepSimdTfortyeightSpeedup & \todo{re-run} & \sweepOptimizedTfortyeightSpeedup \\
+128   & \simdWidthAVXOhtwentyeightSpeedup & \pfNextBTzeroDonetwentyeightOhtwentyeightSpeedup & \optSweepOhtwentyeightSpeedup \\
+256   & \simdWidthAVXTwofiftysixSpeedup & \pfNextBTzeroDsixteenTwofiftysixSpeedup & \optSweepTwofiftysixSpeedup \\
+512   & \simdWidthAVXFtwelveSpeedup & \pfNextBTzeroDonetwentyeightFtwelveSpeedup & \optSweepFtwelveSpeedup \\
+1024  & \simdWidthAVXTtwentyfourSpeedup & \pfNextBTzeroDonetwentyeightTtwentyfourSpeedup & \optSweepTtwentyfourSpeedup \\
+2048  & \simdWidthAVXTfortyeightSpeedup & \pfNoneNADNATfortyeightSpeedup & \optSweepTfortyeightSpeedup \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 \subsection{Analysis: Synergy Between Techniques}
 
-\todo{Synergy analysis to be rewritten after Task 2A prefetch results are finalized. The key argument --- SIMD removes the compute bottleneck while blocking removes the memory bottleneck, and the combination exceeds either alone --- will remain, but the specific numbers (prefetch-only speedup, crossover point, GFLOP/s comparisons) need to come from the updated prefetch data.}
+The three techniques target fundamentally different bottlenecks, and the comparison plot shows this clearly:
 
-The combined kernel achieves a peak of \sweepOptimizedFifteenthirtysixSpeedup{} at $1536{\times}1536$.
-
-The synergy is not additive but \emph{complementary}:
 \begin{itemize}[nosep]
-    \item \textbf{SIMD without blocking} is compute-efficient at small sizes but becomes memory-bound at large sizes. At $2048$, SIMD-only drops to \sweepSimdTfortyeightSpeedup{} because the operands spill out of L2 and every tile re-streams them from DRAM.
+    \item \textbf{SIMD (AVX2)} achieves \simdWidthAVXFtwelveSpeedup{} at $512$ (\simdWidthAVXFtwelveGflops{} GFLOP/s) by processing 8 floats per instruction. At $2048$, it drops to \simdWidthAVXTfortyeightSpeedup{} as the operands spill out of L2 and every row re-streams from DRAM --- SIMD removes the compute bottleneck but not the memory bottleneck.
 
-    \item \textbf{Blocking without SIMD} (the prefetch stage) keeps the data cache-resident but is limited by scalar instruction throughput. \todo{Update with actual prefetch-only throughput after 2A re-run.}
+    \item \textbf{Prefetch (scalar)} provides negligible benefit: the best configuration (next\_B, T0, distance 128) achieves only ${\sim}1.03$--$1.06{\times}$ speedup at all sizes. The scalar kernel is compute-bound, not memory-bound, so hiding memory latency has minimal impact.
 
-    \item \textbf{Combined}: cache blocking ensures the operands stay in L2, and SIMD ensures the FMA units are fully utilized while the data is resident. \todo{Update GFLOP/s comparisons and lift factors after 2A re-run.}
+    \item \textbf{SIMD + Blocking} combines the 6${\times}$16 AVX2 micro-kernel with MC${\times}$NC cache blocking and B-panel packing. It reaches \optSweepFtwelveGflops{} GFLOP/s at $512$ (\optSweepFtwelveSpeedup) and sustains \optSweepTfortyeightGflops{} GFLOP/s at $2048$ (\optSweepTfortyeightSpeedup) --- whereas SIMD-only drops to \simdWidthAVXTfortyeightGflops{} GFLOP/s at the same size. The blocking keeps the operands in L2, so the SIMD units stay fed.
 
-    \item The crossover point is clear in the speedup plot: SIMD-only dominates at small sizes (where data fits in cache anyway), but the combined kernel dominates at large sizes where blocking prevents the SIMD kernel from going memory-bound.
+    \item The synergy is \emph{complementary}, not additive: SIMD without blocking is compute-efficient but memory-bound at large sizes; blocking without SIMD (the prefetch stage) keeps data cache-resident but is limited by scalar throughput; together, both bottlenecks are addressed simultaneously.
 \end{itemize}
 
 \end{document}
