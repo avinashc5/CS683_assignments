@@ -16,7 +16,7 @@
 % Regenerate: cd task2 && python3 generate_data.py
 \input{data.tex}
 
-\title{CS683 Programming Assignment 1 --- Task 2\\
+\title{CS683 Programming Assignment 1: Task 2\\
 Matrix Multiplication for Inference}
 \author{Avinash Chaudhari -- 23B1064 \and Pranay Marumamula -- 23B1073 \and Siddhant Mulkikar -- 23B0956 \and Madhav R Babu -- 23B1060}
 \date{Autumn 2026}
@@ -58,7 +58,7 @@ We implement the prefetch stage as a \textbf{scalar} (non-SIMD) kernel with five
 controlled by compile-time defines:
 
 \begin{itemize}[nosep]
-    \item \textbf{Mode 0 (none)}: baseline --- no prefetch instructions.
+    \item \textbf{Mode 0 (none)}: baseline: no prefetch instructions.
     \item \textbf{Mode 1 (within\_row)}: prefetches $A$ and $B$ elements \texttt{PF\_DIST} floats ahead within the current dot-product loop, once per cache line (every 16 floats).
     \item \textbf{Mode 2 (next\_B)}: prefetches the start of the \emph{next} $B$ row before computing the current dot product, so the next column's data is already in cache.
     \item \textbf{Mode 3 (C\_output)}: prefetches the $C$ output location before the dot product.
@@ -124,7 +124,7 @@ Key observations from the cache miss data:
 
 \textbf{next\_B} is the only mode that consistently achieves speedup ${\geq}1.0{\times}$.
 \textbf{within\_row} and \textbf{all} modes cause significant slowdowns (0.47--0.82$\times$) because the high volume of prefetch instructions (one every 16 iterations of the inner $K$ loop) adds overhead that overwhelms any benefit.
-\textbf{C\_output} is neutral --- the single output store per dot product is too infrequent to benefit from prefetching.
+\textbf{C\_output} is neutral: the single output store per dot product is too infrequent to benefit from prefetching.
 
 \subsubsection{Speedup by Prefetch Distance}
 
@@ -153,7 +153,7 @@ NTA (non-temporal) performs similarly to T0 at large sizes but offers no advanta
 \subsection{Optimal Parameters}
 
 \begin{itemize}[nosep]
-    \item \textbf{Best prefetch mode}: next\_B (mode 2) --- prefetch the start of the next $B$ row.
+    \item \textbf{Best prefetch mode}: next\_B (mode 2): prefetch the start of the next $B$ row.
     \item \textbf{Best prefetch distance}: 64--128 floats.
     \item \textbf{Best cache fill level}: \texttt{\_MM\_HINT\_T0} (L1).
 \end{itemize}
@@ -253,7 +253,7 @@ Three SIMD widths were benchmarked:
     \item \textbf{AVX2 256-bit}: 8 floats per vector, $4 \times 2$ register tile, 8 accumulators
     \item \textbf{AVX-512 512-bit}: 16 floats per vector, $4 \times 2$ register tile, 8 accumulators
 \end{itemize}
-None of these include cache blocking --- the kernel streams through $A$ and $B$ from whatever cache level holds them.
+None of these include cache blocking: the kernel streams through $A$ and $B$ from whatever cache level holds them.
 
 \subsection{Instruction Count and Performance}
 
@@ -285,7 +285,7 @@ Metrics & & 128 & 256 & 512 & 1024 & 2048 \\
 }
 \end{table}
 
-\textbf{Instruction count observation:} SIMD does \emph{not} significantly reduce instruction count --- the SIMD versions issue roughly the same number of instructions as the naive version (within ${\sim}7\%$).
+\textbf{Instruction count observation:} SIMD does \emph{not} significantly reduce instruction count: the SIMD versions issue roughly the same number of instructions as the naive version (within ${\sim}7\%$).
 This is because the register-tiled micro-kernel still executes $O(MNK)$ FMA instructions; SIMD packs 4/8/16 multiply-adds into each instruction but also adds overhead from broadcasts, horizontal reductions, and cleanup.
 The speedup comes not from fewer instructions but from each instruction doing $4{\times}$/$8{\times}$/$16{\times}$ more work.
 
@@ -384,7 +384,7 @@ $B$ + all six $A$ streams  & 26.2 -- 31.3       & $\sim$28 \\
 Prefetching is 0--5\% \emph{slower} on the $B$ stream and $\sim$25\% slower when the six
 $A$ broadcast streams are prefetched as well. The mechanism: packing already converts
 every inner-loop access into a unit-stride walk, which the L2 hardware streamer predicts
-perfectly, so the software hint adds no information --- it only spends load-port slots
+perfectly, so the software hint adds no information; it only spends load-port slots
 that the 12-FMA-per-8-load inner loop cannot spare. This is consistent with the flat
 distance curve in the standalone prefetch stage (Task 2A).
 
@@ -414,7 +414,7 @@ $2048^3$ & 366--464 (unstable) & \textbf{326--329 (stable)} & $\sim$20\% \textbf
 While the working set fits in cache, prefetch is pure overhead. Once it exceeds the L3
 (at $2048^3$ three matrices total 48\,MB against a 12\,MB L3), demand misses reach DRAM,
 the hardware prefetcher loses stream history under eviction pressure, and the constant
-software lookahead genuinely hides latency --- $\sim$20\% faster \emph{and} the large
+software lookahead genuinely hides latency: $\sim$20\% faster \emph{and} the large
 run-to-run variance collapses. Taken together, the two experiments say: \emph{software
 prefetch is a substitute for locality, not an addition to it}. A kernel that already has
 locality (blocking + packing) gains nothing at any size; a kernel that lacks it gains
@@ -432,7 +432,7 @@ Stage & Instructions & L1-D Misses & L2 Misses & LLC Misses & IPC \\
 \midrule
 Naive           & \perfNaiveInsns & \perfNaiveLoneDmiss & \perfNaiveLtwoMiss & \perfNaiveLLCmiss & \perfNaiveIPC \\
 SIMD            & \perfSimdInsns & \perfSimdLoneDmiss & \perfSimdLtwoMiss & \perfSimdLLCmiss & \perfSimdIPC \\
-Prefetch (next\_B, T0, d=128)  & --- & \pfNextBTzeroDonetwentyeightTtwentyfourLoneDmiss & \pfNextBTzeroDonetwentyeightTtwentyfourLtwoMiss & \pfNextBTzeroDonetwentyeightTtwentyfourLLCmiss & --- \\
+Prefetch (next\_B, T0, d=128)  & -- & \pfNextBTzeroDonetwentyeightTtwentyfourLoneDmiss & \pfNextBTzeroDonetwentyeightTtwentyfourLtwoMiss & \pfNextBTzeroDonetwentyeightTtwentyfourLLCmiss & -- \\
 Prefetch + SIMD & \perfOptimizedInsns & \perfOptimizedLoneDmiss & \perfOptimizedLtwoMiss & \perfOptimizedLLCmiss & \perfOptimizedIPC \\
 \bottomrule
 \end{tabular}%
@@ -443,7 +443,7 @@ Key observations:
 \begin{itemize}[nosep]
     \item The scalar prefetch kernel (next\_B, T0, distance 128, measured with HW prefetchers off) shows similar L1-D and L2 miss counts to the naive kernel, confirming that the scalar kernel is compute-bound and software prefetch adds negligible benefit even without hardware assistance.
     \item SIMD reduces instruction count dramatically (by ${\sim}4{\times}$) because each vector instruction processes 8 floats. This is the primary source of speedup at cache-resident sizes.
-    \item The combined kernel (Prefetch + SIMD) has the lowest cache misses thanks to its MC${\times}$NC blocking, \emph{and} the lowest instruction count thanks to SIMD --- achieving both benefits simultaneously.
+    \item The combined kernel (Prefetch + SIMD) has the lowest cache misses thanks to its MC${\times}$NC blocking, \emph{and} the lowest instruction count thanks to SIMD, achieving both benefits simultaneously.
 \end{itemize}
 
 \begin{figure}[H]
@@ -516,7 +516,7 @@ The three techniques target fundamentally different bottlenecks:
 
     \item \textbf{Prefetch (scalar)} provides negligible benefit: the best configuration achieves ${\sim}1.03$--$1.06{\times}$ speedup at all sizes. The scalar kernel is compute-bound, not memory-bound.
 
-    \item \textbf{SIMD + Blocking} pays a fixed overhead for B-panel packing, which hurts at small sizes (\optSweepOhtwentyeightGflops{} GFLOP/s at $128$ vs.\ \simdWidthAVXOhtwentyeightGflops{} for SIMD-only). The crossover occurs around $512$, where the packing cost is amortized and the MC${\times}$NC blocking keeps the packed panel resident in L2. From $512$ onward, the combined kernel dominates: \optSweepFtwelveGflops{} GFLOP/s at $512$, \optSweepTtwentyfourGflops{} at $1024$, and \optSweepTfortyeightGflops{} at $2048$ --- while SIMD-only drops to \simdWidthAVXTfortyeightGflops{} at $2048$.
+    \item \textbf{SIMD + Blocking} pays a fixed overhead for B-panel packing, which hurts at small sizes (\optSweepOhtwentyeightGflops{} GFLOP/s at $128$ vs.\ \simdWidthAVXOhtwentyeightGflops{} for SIMD-only). The crossover occurs around $512$, where the packing cost is amortized and the MC${\times}$NC blocking keeps the packed panel resident in L2. From $512$ onward, the combined kernel dominates: \optSweepFtwelveGflops{} GFLOP/s at $512$, \optSweepTtwentyfourGflops{} at $1024$, and \optSweepTfortyeightGflops{} at $2048$, while SIMD-only drops to \simdWidthAVXTfortyeightGflops{} at $2048$.
 
     \item The synergy is \emph{complementary}: SIMD removes the compute bottleneck (fewer instructions per FLOP); blocking removes the memory bottleneck (data stays in L2). Neither alone achieves both. The combined kernel sustains $>$100 GFLOP/s from $512$ through $2048$, while SIMD-only loses half its throughput at $2048$ and prefetch-only never exceeds the naive baseline by more than ${\sim}6\%$.
 \end{itemize}
