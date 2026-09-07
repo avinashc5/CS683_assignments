@@ -28,7 +28,7 @@ make AVX512="$AVX512" >/dev/null
 # Detect whether perf can count instructions here.
 HAS_PERF=0
 if command -v perf >/dev/null 2>&1; then
-    if $PIN perf stat -e instructions -- true 2>&1 | grep -qE "instructions|insn per cycle"; then
+    if $PIN perf stat -e instructions -- true 2>&1 | grep -qE "[0-9].*instructions"; then
         HAS_PERF=1
     fi
 fi
@@ -37,7 +37,9 @@ fi
 insns_for() {  # <width-key> <size>
     [ "$HAS_PERF" -eq 1 ] || { echo "-"; return; }
     $PIN perf stat -e instructions -- "$BIN" "$1" "$2" "$2" "$2" 2>&1 \
-        | grep -E "^[[:space:]]*[0-9,]+[[:space:]]+instructions" \
+        | grep -E "instructions" \
+        | grep -E "[0-9]" \
+        | grep -v "not counted\|not supported" \
         | head -1 | awk '{gsub(/,/,"",$1); print $1}'
 }
 
@@ -62,7 +64,9 @@ for S in $SIZES; do
             *) key="" ;;
         esac
         ic="-"
-        [ -n "$key" ] && ic=$(insns_for "$key" "$S")
+        if [ -n "$key" ] && echo "$line" | grep -qv "skip\|n/a"; then
+            ic=$(insns_for "$key" "$S")
+        fi
         printf "%-12s  %-16s  %12s  %10s  %18s\n" \
             "${S}x${S}x${S}" "$name" "$gf" "$spd" "$ic" >> "$OUT"
     done

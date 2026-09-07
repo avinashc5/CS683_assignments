@@ -29,22 +29,19 @@
 % ============================================================================
 
 \begin{itemize}
-    \item \textbf{CPU:} Intel Core i5-11400H (Tiger Lake-H), 6 cores / 6 threads
-          (SMT disabled), all identical P-cores, base 2.70 GHz, max 4.50 GHz
-    \item \textbf{L1-D Cache:} 48 KiB per core (288 KiB total, 6 instances),
-          64-byte lines, 12-way set associative
-    \item \textbf{L2 Cache:} 1.25 MiB per core (7.5 MiB total, 6 instances), 20-way
-    \item \textbf{L3 Cache:} 12 MiB (1 instance, shared), 8-way
-    \item \textbf{Vector ISA:} AVX2 + FMA and AVX-512
-          (\texttt{avx512f}, \texttt{avx512dq}, \texttt{avx512bw}, \texttt{avx512vl},
-          \texttt{avx512\_vnni})
+    \item \textbf{CPU:} Intel Core Ultra 5 125U (Meteor Lake), hybrid architecture:
+          2 P-cores (4 threads with HT, max 4.30 GHz) + 8 E-cores (max 3.60 GHz) +
+          2 LP E-cores (max 2.10 GHz), 14 logical CPUs total
+    \item \textbf{L1-D Cache (P-core):} 48 KiB per core, 64-byte lines, 12-way set associative
+    \item \textbf{L2 Cache (P-core):} 2 MiB per core, 16-way
+    \item \textbf{L3 Cache:} 12 MiB (1 instance, shared), 12-way
+    \item \textbf{Vector ISA:} AVX2 + FMA, AVX-VNNI (no AVX-512)
     \item \textbf{Compiler flags:} \texttt{-std=c++17 -O2 -fno-tree-vectorize -mavx2 -mfma}
-          (the AVX-512 variant additionally uses \texttt{-mavx512f})
-    \item \textbf{OS:} Ubuntu 24.04.4 LTS, kernel 6.8.0-138-generic (x86\_64)
-    \item \textbf{Pinning:} \texttt{taskset -c 3}. This CPU is not hybrid, so every core
-          is equivalent; a single fixed core is used so all measurements share one
-          cache and frequency context.
-    \item \textbf{Frequency governor:} \texttt{performance}, with
+    \item \textbf{OS:} Ubuntu 26.04.1 LTS, kernel 7.0.0-31-generic (x86\_64)
+    \item \textbf{Pinning:} \texttt{taskset -c 3} (a P-core). On this hybrid CPU,
+          \texttt{perf} reports both \texttt{cpu\_core/} and \texttt{cpu\_atom/} events;
+          all hardware counter measurements use the \texttt{cpu\_core/} prefix.
+    \item \textbf{Frequency governor:} \texttt{powersave}, with
           \texttt{kernel.perf\_event\_paranoid = -1} so \texttt{perf} can read the
           hardware counters used for the instruction-count and MPKI tables.
 \end{itemize}

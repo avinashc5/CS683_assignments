@@ -248,11 +248,10 @@ After the $K$ loop, each accumulator is horizontally reduced (\texttt{hsum256}) 
 
 Leftover rows ($M \bmod 4$), columns ($N \bmod 2$), and $K$ elements ($K \bmod 8$) fall to a scalar cleanup path.
 
-Three SIMD widths were benchmarked:
+Two SIMD widths were benchmarked (this CPU does not support AVX-512):
 \begin{itemize}[nosep]
     \item \textbf{SSE 128-bit}: 4 floats per vector, $4 \times 2$ register tile, 8 accumulators
     \item \textbf{AVX2 256-bit}: 8 floats per vector, $4 \times 2$ register tile, 8 accumulators
-    \item \textbf{AVX-512 512-bit}: 16 floats per vector, $4 \times 2$ register tile, 8 accumulators
 \end{itemize}
 None of these include cache blocking: the kernel streams through $A$ and $B$ from whatever cache level holds them.
 
@@ -277,10 +276,6 @@ Metrics & & 128 & 256 & 512 & 1024 & 2048 \\
 \textbf{AVX2 256}  & Instructions & \simdWidthAVXOhtwentyeightInsns & \simdWidthAVXTwofiftysixInsns & \simdWidthAVXFtwelveInsns & \simdWidthAVXTtwentyfourInsns & \simdWidthAVXTfortyeightInsns \\
                    & GFLOP/s      & \simdWidthAVXOhtwentyeightGflops & \simdWidthAVXTwofiftysixGflops & \simdWidthAVXFtwelveGflops & \simdWidthAVXTtwentyfourGflops & \simdWidthAVXTfortyeightGflops \\
                    & Speedup      & \simdWidthAVXOhtwentyeightSpeedup & \simdWidthAVXTwofiftysixSpeedup & \simdWidthAVXFtwelveSpeedup & \simdWidthAVXTtwentyfourSpeedup & \simdWidthAVXTfortyeightSpeedup \\
-\midrule
-\textbf{AVX-512}   & Instructions & \simdWidthAVXFiveTwelveOhtwentyeightInsns & \simdWidthAVXFiveTwelveTwofiftysixInsns & \simdWidthAVXFiveTwelveFtwelveInsns & \simdWidthAVXFiveTwelveTtwentyfourInsns & \simdWidthAVXFiveTwelveTfortyeightInsns \\
-                   & GFLOP/s      & \simdWidthAVXFiveTwelveOhtwentyeightGflops & \simdWidthAVXFiveTwelveTwofiftysixGflops & \simdWidthAVXFiveTwelveFtwelveGflops & \simdWidthAVXFiveTwelveTtwentyfourGflops & \simdWidthAVXFiveTwelveTfortyeightGflops \\
-                   & Speedup      & \simdWidthAVXFiveTwelveOhtwentyeightSpeedup & \simdWidthAVXFiveTwelveTwofiftysixSpeedup & \simdWidthAVXFiveTwelveFtwelveSpeedup & \simdWidthAVXFiveTwelveTtwentyfourSpeedup & \simdWidthAVXFiveTwelveTfortyeightSpeedup \\
 \bottomrule
 \end{tabular}%
 }
@@ -314,30 +309,32 @@ The speedup comes not from fewer instructions but from each instruction doing $4
 
 \subsubsection{Q1: Speedup Trends}
 
-Three trends are visible:
+Two trends are visible:
 
 \begin{enumerate}
     \item \textbf{Wider SIMD $\Rightarrow$ higher peak speedup.}
-    AVX-512 reaches \simdWidthAVXFiveTwelveFtwelveSpeedup{} at $512{\times}512$, AVX2 reaches \simdWidthAVXFtwelveSpeedup{}, and SSE reaches \simdWidthSSEFtwelveSpeedup{}.
-    The ratio tracks the vector width (roughly $2{\times}$ per doubling) but falls short of the theoretical $4{\times}$/$8{\times}$/$16{\times}$ due to load/broadcast overhead and the horizontal reduction at the end.
+    AVX2 reaches \simdWidthAVXFtwelveSpeedup{} at $512{\times}512$ while SSE reaches \simdWidthSSEFtwelveSpeedup{}.
+    The ratio roughly tracks the $2{\times}$ vector width difference but falls short of
+    the theoretical $2{\times}$ due to load/broadcast overhead and the horizontal reduction.
 
     \item \textbf{Speedup rises then falls with matrix size.}
     At small sizes (128) the loop overhead and scalar cleanup dominate, limiting SSE to \simdWidthSSEOhtwentyeightSpeedup{}.
     Peak is around $512$--$1024$, where the working set fits mostly in L2 and the micro-kernel runs at near-peak throughput.
-    At $2048$ all widths drop significantly (AVX-512 falls from \simdWidthAVXFiveTwelveFtwelveSpeedup{} to \simdWidthAVXFiveTwelveTfortyeightSpeedup{}) because the $A$ and $B$ matrices no longer fit in L2, and the unblocked kernel becomes memory-bound.
-
-    \item \textbf{AVX2 and AVX-512 converge at small sizes.}
-    At $128{\times}128$, AVX2 (\simdWidthAVXOhtwentyeightSpeedup{}) nearly matches AVX-512 (\simdWidthAVXFiveTwelveOhtwentyeightSpeedup{}) because the problem is too small for the wider vector to amortize its overhead.
+    At $2048$ both widths drop significantly (AVX2 falls from \simdWidthAVXTtwentyfourSpeedup{} to \simdWidthAVXTfortyeightSpeedup{}) because the $A$ and $B$ matrices no longer fit in L2, and the unblocked kernel becomes memory-bound.
+    Notably, AVX2 (\simdWidthAVXTfortyeightGflops{} GFLOP/s) drops below SSE (\simdWidthSSETfortyeightGflops{} GFLOP/s) at $2048$: the wider vectors require more data per instruction, making the memory bottleneck worse.
 \end{enumerate}
 
 \subsubsection{Q2: Best SIMD Width}
 
-\textbf{AVX-512 (512-bit)} achieves the maximum speedup at every matrix size where the kernel is not memory-bound.
-The peak is \simdWidthAVXFiveTwelveFtwelveSpeedup{} at $512{\times}512$ (\simdWidthAVXFiveTwelveFtwelveGflops{} GFLOP/s).
-This is expected: each 512-bit FMA processes 16 floats, double AVX2's 8, so the arithmetic throughput doubles while instruction-issue overhead stays roughly constant.
+\textbf{AVX2 (256-bit)} achieves the maximum speedup at sizes up to $1024$, peaking at
+\simdWidthAVXTtwentyfourSpeedup{} at $1024{\times}1024$ (\simdWidthAVXTtwentyfourGflops{} GFLOP/s).
+Each 256-bit FMA processes 8 floats, double SSE's 4, so the arithmetic throughput roughly doubles
+while instruction-issue overhead stays constant.
 
-However, at $2048{\times}2048$ the advantage narrows (AVX-512 \simdWidthAVXFiveTwelveTfortyeightSpeedup{} vs AVX2 \simdWidthAVXTfortyeightSpeedup{}) because the bottleneck shifts from compute to memory bandwidth.
-Cache blocking (Task 2C) is required to sustain AVX-512's higher throughput at large sizes.
+However, at $2048{\times}2048$ AVX2 (\simdWidthAVXTfortyeightGflops{} GFLOP/s) actually falls
+below SSE (\simdWidthSSETfortyeightGflops{} GFLOP/s) because the wider vectors demand more
+memory bandwidth per instruction, and the unblocked kernel is fully memory-bound at this size.
+Cache blocking (Task 2C) is required to sustain AVX2's throughput advantage at large sizes.
 
 % ============================================================================
 \section{Task 2C: Software Prefetching + SIMD (3 points)}
@@ -434,17 +431,56 @@ Stage & Instructions & L1-D Misses & L2 Misses & LLC Misses & IPC \\
 Naive           & \perfNaiveInsns & \perfNaiveLoneDmiss & \perfNaiveLtwoMiss & \perfNaiveLLCmiss & \perfNaiveIPC \\
 SIMD            & \perfSimdInsns & \perfSimdLoneDmiss & \perfSimdLtwoMiss & \perfSimdLLCmiss & \perfSimdIPC \\
 Prefetch (next\_B, T0, d=128)  & -- & \pfNextBTzeroDonetwentyeightTtwentyfourLoneDmiss & \pfNextBTzeroDonetwentyeightTtwentyfourLtwoMiss & \pfNextBTzeroDonetwentyeightTtwentyfourLLCmiss & -- \\
-Prefetch + SIMD & \perfOptimizedInsns & \perfOptimizedLoneDmiss & \perfOptimizedLtwoMiss & \perfOptimizedLLCmiss & \perfOptimizedIPC \\
+SIMD + Blocking & \perfOptimizedInsns & \perfOptimizedLoneDmiss & \perfOptimizedLtwoMiss & \perfOptimizedLLCmiss & \perfOptimizedIPC \\
 \bottomrule
 \end{tabular}%
 }
 \end{table}
 
-Key observations:
+Key observations at $1024$:
 \begin{itemize}[nosep]
     \item The scalar prefetch kernel (next\_B, T0, distance 128, measured with HW prefetchers off) shows similar L1-D and L2 miss counts to the naive kernel, confirming that the scalar kernel is compute-bound and software prefetch adds negligible benefit even without hardware assistance.
     \item SIMD reduces instruction count dramatically (by ${\sim}4{\times}$) because each vector instruction processes 8 floats. This is the primary source of speedup at cache-resident sizes.
-    \item The combined kernel (Prefetch + SIMD) has the lowest cache misses thanks to its MC${\times}$NC blocking, \emph{and} the lowest instruction count thanks to SIMD, achieving both benefits simultaneously.
+    \item The SIMD + Blocking kernel has the lowest cache misses thanks to MC${\times}$NC blocking, \emph{and} the lowest instruction count thanks to SIMD, achieving both benefits simultaneously.
+\end{itemize}
+
+\subsubsection{SIMD + Blocking Counters Across Sizes}
+
+\begin{table}[H]
+\centering
+\caption{Hardware counters for the SIMD + Blocking kernel across matrix sizes}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{rrrrrrrr}
+\toprule
+Size & GFLOP/s & Speedup & Instructions & L1-D Misses & L2 Misses & LLC Misses & IPC \\
+\midrule
+128  & \optSweepOhtwentyeightGflops & \optSweepOhtwentyeightSpeedup & \optSweepOhtwentyeightInsns & \optSweepOhtwentyeightLoneDmiss & \optSweepOhtwentyeightLtwoMiss & \optSweepOhtwentyeightLLCmiss & \optSweepOhtwentyeightIPC \\
+256  & \optSweepTwofiftysixGflops & \optSweepTwofiftysixSpeedup & \optSweepTwofiftysixInsns & \optSweepTwofiftysixLoneDmiss & \optSweepTwofiftysixLtwoMiss & \optSweepTwofiftysixLLCmiss & \optSweepTwofiftysixIPC \\
+512  & \optSweepFtwelveGflops & \optSweepFtwelveSpeedup & \optSweepFtwelveInsns & \optSweepFtwelveLoneDmiss & \optSweepFtwelveLtwoMiss & \optSweepFtwelveLLCmiss & \optSweepFtwelveIPC \\
+768  & \optSweepSevensixtyeightGflops & \optSweepSevensixtyeightSpeedup & \optSweepSevensixtyeightInsns & \optSweepSevensixtyeightLoneDmiss & \optSweepSevensixtyeightLtwoMiss & \optSweepSevensixtyeightLLCmiss & \optSweepSevensixtyeightIPC \\
+1024 & \optSweepTtwentyfourGflops & \optSweepTtwentyfourSpeedup & \optSweepTtwentyfourInsns & \optSweepTtwentyfourLoneDmiss & \optSweepTtwentyfourLtwoMiss & \optSweepTtwentyfourLLCmiss & \optSweepTtwentyfourIPC \\
+1536 & \optSweepFifteenthirtysixGflops & \optSweepFifteenthirtysixSpeedup & \optSweepFifteenthirtysixInsns & \optSweepFifteenthirtysixLoneDmiss & \optSweepFifteenthirtysixLtwoMiss & \optSweepFifteenthirtysixLLCmiss & \optSweepFifteenthirtysixIPC \\
+2048 & \optSweepTfortyeightGflops & \optSweepTfortyeightSpeedup & \optSweepTfortyeightInsns & \optSweepTfortyeightLoneDmiss & \optSweepTfortyeightLtwoMiss & \optSweepTfortyeightLLCmiss & \optSweepTfortyeightIPC \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+The counters reveal the kernel's transition from compute-bound to memory-bound as the
+matrix grows:
+\begin{itemize}[nosep]
+    \item \textbf{IPC drops from 3.50 to 2.43} as size increases from 128 to 2048. At small
+          sizes, the packed B panel fits in L2 and the FMA pipeline is nearly fully utilized.
+          At 2048, L2 misses reach 3.5B and stall cycles dominate.
+    \item \textbf{L2 misses jump sharply at 768} (from 1.5M to 113M), marking the point where
+          the packed B panel ($K \times \text{NC} = 768 \times 64 = 192$ KiB) begins to exceed the
+          2 MiB L2 capacity together with the A sub-panel and output block.
+    \item \textbf{LLC misses remain negligible up to 1024} ($<$80K), showing that L3 absorbs
+          the L2 overflow. At 2048, LLC misses reach 16M, as the full working set
+          ($2048 \times 64 \times 4 = 512$ KiB per panel, but accumulated across all panels)
+          exceeds L3, explaining the slight GFLOP/s drop at that size.
+    \item \textbf{Instruction count scales as $O(N^3)$} as expected, growing from 86M at 128
+          to 322B at 2048.
 \end{itemize}
 
 \begin{figure}[H]
