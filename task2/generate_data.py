@@ -102,7 +102,7 @@ if os.path.exists(path):
     with open(path) as f:
         for line in f:
             line = line.strip()
-            if not line or line.startswith('size') or line.startswith('-'):
+            if not line or line.startswith('size') or line.startswith('='):
                 continue
             parts = line.split()
             if len(parts) < 5:
@@ -112,6 +112,13 @@ if os.path.exists(path):
                 sk = SIZE_KEYS[size]
                 defcmd(f'optSweep{sk}Gflops', fmt_float(parse_float(parts[3])))
                 defcmd(f'optSweep{sk}Speedup', parse_speedup(parts[4]))
+                # Hardware counters (new format: insns, L1D, L2, LLC, IPC)
+                if len(parts) >= 10:
+                    defcmd(f'optSweep{sk}Insns', fmt_insns(parse_float(parts[5])))
+                    defcmd(f'optSweep{sk}LoneDmiss', fmt_insns(parse_float(parts[6])))
+                    defcmd(f'optSweep{sk}LtwoMiss', fmt_insns(parse_float(parts[7])))
+                    defcmd(f'optSweep{sk}LLCmiss', fmt_insns(parse_float(parts[8])))
+                    defcmd(f'optSweep{sk}IPC', fmt_float(parse_float(parts[9])))
 
 # ============================================================================
 # Perf stage results (hardware counters at 1024)
