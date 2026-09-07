@@ -12,7 +12,7 @@
 #include "matmul.h"
 
 #ifndef PF_DIST
-#define PF_DIST 0
+#define PF_DIST 64
 #endif
 #ifndef PF_HINT
 #define PF_HINT _MM_HINT_T0
