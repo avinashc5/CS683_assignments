@@ -247,11 +247,10 @@ After the $K$ loop, each accumulator is horizontally reduced (\texttt{hsum256}) 
 
 Leftover rows ($M \bmod 4$), columns ($N \bmod 2$), and $K$ elements ($K \bmod 8$) fall to a scalar cleanup path.
 
-Three SIMD widths were benchmarked:
+Two SIMD widths were benchmarked (this CPU does not support AVX-512):
 \begin{itemize}[nosep]
     \item \textbf{SSE 128-bit}: 4 floats per vector, $4 \times 2$ register tile, 8 accumulators
     \item \textbf{AVX2 256-bit}: 8 floats per vector, $4 \times 2$ register tile, 8 accumulators
-    \item \textbf{AVX-512 512-bit}: 16 floats per vector, $4 \times 2$ register tile, 8 accumulators
 \end{itemize}
 None of these include cache blocking: the kernel streams through $A$ and $B$ from whatever cache level holds them.
 
@@ -276,10 +275,6 @@ Metrics & & 128 & 256 & 512 & 1024 & 2048 \\
 \textbf{AVX2 256}  & Instructions & \simdWidthAVXOhtwentyeightInsns & \simdWidthAVXTwofiftysixInsns & \simdWidthAVXFtwelveInsns & \simdWidthAVXTtwentyfourInsns & \simdWidthAVXTfortyeightInsns \\
                    & GFLOP/s      & \simdWidthAVXOhtwentyeightGflops & \simdWidthAVXTwofiftysixGflops & \simdWidthAVXFtwelveGflops & \simdWidthAVXTtwentyfourGflops & \simdWidthAVXTfortyeightGflops \\
                    & Speedup      & \simdWidthAVXOhtwentyeightSpeedup & \simdWidthAVXTwofiftysixSpeedup & \simdWidthAVXFtwelveSpeedup & \simdWidthAVXTtwentyfourSpeedup & \simdWidthAVXTfortyeightSpeedup \\
-\midrule
-\textbf{AVX-512}   & Instructions & \simdWidthAVXFiveTwelveOhtwentyeightInsns & \simdWidthAVXFiveTwelveTwofiftysixInsns & \simdWidthAVXFiveTwelveFtwelveInsns & \simdWidthAVXFiveTwelveTtwentyfourInsns & \simdWidthAVXFiveTwelveTfortyeightInsns \\
-                   & GFLOP/s      & \simdWidthAVXFiveTwelveOhtwentyeightGflops & \simdWidthAVXFiveTwelveTwofiftysixGflops & \simdWidthAVXFiveTwelveFtwelveGflops & \simdWidthAVXFiveTwelveTtwentyfourGflops & \simdWidthAVXFiveTwelveTfortyeightGflops \\
-                   & Speedup      & \simdWidthAVXFiveTwelveOhtwentyeightSpeedup & \simdWidthAVXFiveTwelveTwofiftysixSpeedup & \simdWidthAVXFiveTwelveFtwelveSpeedup & \simdWidthAVXFiveTwelveTtwentyfourSpeedup & \simdWidthAVXFiveTwelveTfortyeightSpeedup \\
 \bottomrule
 \end{tabular}%
 }
@@ -313,30 +308,32 @@ The speedup comes not from fewer instructions but from each instruction doing $4
 
 \subsubsection{Q1: Speedup Trends}
 
-Three trends are visible:
+Two trends are visible:
 
 \begin{enumerate}
     \item \textbf{Wider SIMD $\Rightarrow$ higher peak speedup.}
-    AVX-512 reaches \simdWidthAVXFiveTwelveFtwelveSpeedup{} at $512{\times}512$, AVX2 reaches \simdWidthAVXFtwelveSpeedup{}, and SSE reaches \simdWidthSSEFtwelveSpeedup{}.
-    The ratio tracks the vector width (roughly $2{\times}$ per doubling) but falls short of the theoretical $4{\times}$/$8{\times}$/$16{\times}$ due to load/broadcast overhead and the horizontal reduction at the end.
+    AVX2 reaches \simdWidthAVXFtwelveSpeedup{} at $512{\times}512$ while SSE reaches \simdWidthSSEFtwelveSpeedup{}.
+    The ratio roughly tracks the $2{\times}$ vector width difference but falls short of
+    the theoretical $2{\times}$ due to load/broadcast overhead and the horizontal reduction.
 
     \item \textbf{Speedup rises then falls with matrix size.}
     At small sizes (128) the loop overhead and scalar cleanup dominate, limiting SSE to \simdWidthSSEOhtwentyeightSpeedup{}.
     Peak is around $512$--$1024$, where the working set fits mostly in L2 and the micro-kernel runs at near-peak throughput.
-    At $2048$ all widths drop significantly (AVX-512 falls from \simdWidthAVXFiveTwelveFtwelveSpeedup{} to \simdWidthAVXFiveTwelveTfortyeightSpeedup{}) because the $A$ and $B$ matrices no longer fit in L2, and the unblocked kernel becomes memory-bound.
-
-    \item \textbf{AVX2 and AVX-512 converge at small sizes.}
-    At $128{\times}128$, AVX2 (\simdWidthAVXOhtwentyeightSpeedup{}) nearly matches AVX-512 (\simdWidthAVXFiveTwelveOhtwentyeightSpeedup{}) because the problem is too small for the wider vector to amortize its overhead.
+    At $2048$ both widths drop significantly (AVX2 falls from \simdWidthAVXTtwentyfourSpeedup{} to \simdWidthAVXTfortyeightSpeedup{}) because the $A$ and $B$ matrices no longer fit in L2, and the unblocked kernel becomes memory-bound.
+    Notably, AVX2 (\simdWidthAVXTfortyeightGflops{} GFLOP/s) drops below SSE (\simdWidthSSETfortyeightGflops{} GFLOP/s) at $2048$---the wider vectors require more data per instruction, making the memory bottleneck worse.
 \end{enumerate}
 
 \subsubsection{Q2: Best SIMD Width}
 
-\textbf{AVX-512 (512-bit)} achieves the maximum speedup at every matrix size where the kernel is not memory-bound.
-The peak is \simdWidthAVXFiveTwelveFtwelveSpeedup{} at $512{\times}512$ (\simdWidthAVXFiveTwelveFtwelveGflops{} GFLOP/s).
-This is expected: each 512-bit FMA processes 16 floats, double AVX2's 8, so the arithmetic throughput doubles while instruction-issue overhead stays roughly constant.
+\textbf{AVX2 (256-bit)} achieves the maximum speedup at sizes up to $1024$, peaking at
+\simdWidthAVXTtwentyfourSpeedup{} at $1024{\times}1024$ (\simdWidthAVXTtwentyfourGflops{} GFLOP/s).
+Each 256-bit FMA processes 8 floats, double SSE's 4, so the arithmetic throughput roughly doubles
+while instruction-issue overhead stays constant.
 
-However, at $2048{\times}2048$ the advantage narrows (AVX-512 \simdWidthAVXFiveTwelveTfortyeightSpeedup{} vs AVX2 \simdWidthAVXTfortyeightSpeedup{}) because the bottleneck shifts from compute to memory bandwidth.
-Cache blocking (Task 2C) is required to sustain AVX-512's higher throughput at large sizes.
+However, at $2048{\times}2048$ AVX2 (\simdWidthAVXTfortyeightGflops{} GFLOP/s) actually falls
+below SSE (\simdWidthSSETfortyeightGflops{} GFLOP/s) because the wider vectors demand more
+memory bandwidth per instruction, and the unblocked kernel is fully memory-bound at this size.
+Cache blocking (Task 2C) is required to sustain AVX2's throughput advantage at large sizes.
 
 % ============================================================================
 \section{Task 2C: Software Prefetching + SIMD (3 points)}
