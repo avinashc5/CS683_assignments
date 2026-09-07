@@ -71,17 +71,21 @@ for w_idx in "${!WIDTHS[@]}"; do
         simd_gfs=$(echo "$harness_out" | grep "^simd" | awk '{print $4}')
         speedup=$(echo "$harness_out" | grep "^simd" | awk '{print $5}')
 
-        # Get instruction counts via perf stat
-        # grep cpu_core to skip the <not counted> cpu_atom line on hybrid CPUs
+        # Get instruction counts via perf stat.
+        # In `perf stat -x,` output the event name is field 3. It is
+        # "cpu_core/instructions/" on hybrid CPUs (Alder Lake and newer, where the
+        # cpu_atom line must be skipped) but plain "instructions" on non-hybrid parts
+        # such as Tiger Lake. Matching field 3 on /instructions/ handles both, and
+        # `exit` keeps only the first match.
         # Run naive alone
         naive_insns=$(taskset -c 2 perf stat -e instructions -x, \
             "$BIN/matmul_simd_$width" naive "$sz" "$sz" "$sz" 2>&1 \
-            | grep "cpu_core/instructions/" | head -1 | cut -d',' -f1)
+            | awk -F, '$3 ~ /instructions/ {print $1; exit}')
 
         # Run simd alone
         simd_insns=$(taskset -c 2 perf stat -e instructions -x, \
             "$BIN/matmul_simd_$width" simd "$sz" "$sz" "$sz" 2>&1 \
-            | grep "cpu_core/instructions/" | head -1 | cut -d',' -f1)
+            | awk -F, '$3 ~ /instructions/ {print $1; exit}')
 
         printf "%-16s  %-12s  %12s  %12s  %12s  %9s  %9s\n" \
                "${sz}x${sz}x${sz}" "$wname" "$naive_insns" "$simd_insns" \
