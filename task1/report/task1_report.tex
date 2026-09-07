@@ -450,7 +450,7 @@ to compensate for the tiling overhead.
 The reordered modes show $4$--$6{\times}$ higher L1-D MPKI than the naive modes, confirming that
 the $K^{2}$ passes over the output tile cause systematic L1 thrashing.
 Despite this, Reorder + Square still achieves the highest speedups (see above), because the
-weight-reuse benefit of hoisting the kernel loops outweighs the extra L1 misses---those misses
+weight-reuse benefit of hoisting the kernel loops outweighs the extra L1 misses: those misses
 hit in L2 rather than going to main memory.
 The naive-order modes maintain MPKI close to the untiled baseline because they preserve the
 single-pass output access pattern, but gain less from tiling since the naive order already
@@ -469,7 +469,7 @@ has reasonable locality.
 The heatmaps show that the speedup is sensitive to tile dimensions.
 For Reorder + Square, small tile heights with wide tiles (e.g.\ $32{\times}256$) perform best, while
 many other combinations show little benefit or slight slowdowns.
-Naive + Square is less sensitive but also less rewarding---most configurations cluster near $1.0{\times}$.
+Naive + Square is less sensitive but also less rewarding; most configurations cluster near $1.0{\times}$.
 
 \subsubsection{Key Takeaway}
 

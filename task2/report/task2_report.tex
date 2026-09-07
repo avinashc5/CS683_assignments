@@ -122,8 +122,9 @@ Key observations from the cache miss data:
 \caption{Best speedup per prefetch mode across matrix sizes}
 \end{figure}
 
-\textbf{next\_B} is the only mode that consistently achieves speedup ${\geq}1.0{\times}$.
-\textbf{within\_row} and \textbf{all} modes cause significant slowdowns (0.47--0.82$\times$) because the high volume of prefetch instructions (one every 16 iterations of the inner $K$ loop) adds overhead that overwhelms any benefit.
+\textbf{next\_B} is the only mode that achieves speedup ${\geq}1.0{\times}$ at every size (best configs 1.01--1.07$\times$).
+\textbf{within\_row} and \textbf{all} lose even at their \emph{best} configurations for sizes up to 1024 (0.73--0.94$\times$), and their typical configurations are far worse (0.42--0.82$\times$ with T0, collapsing to 0.13--0.17$\times$ with NTA): a prefetch every 16 iterations of the inner $K$ loop adds instruction overhead that overwhelms any benefit.
+At 2048 their best configs scrape just past parity (1.03$\times$ and 1.10$\times$), which is within the naive baseline's run-to-run variance.
 \textbf{C\_output} is neutral: the single output store per dot product is too infrequent to benefit from prefetching.
 
 \subsubsection{Speedup by Prefetch Distance}
@@ -187,12 +188,12 @@ Size & ON & OFF & ON & OFF & ON & OFF & ON & OFF & ON & OFF \\
 \end{table}
 
 At small sizes (128--256), the naive kernel is actually \emph{faster} with hardware
-prefetchers \textbf{off}.  This is counterintuitive but explained by the L1-D miss
-counts: with prefetchers on, the L1 records ${\sim}70$K--$286$K misses at these sizes
-(prefetch-triggered fills that get counted as misses), whereas with prefetchers off the
-miss count is much higher (${\sim}1.4$M--$11$M) but the data already fits in L2/L3,
-so the actual stall cost is low.  The prefetcher's speculative traffic pollutes the
-small L1 cache and causes more evictions than it prevents.
+prefetchers \textbf{off}.  At these sizes the whole working set fits in L2/L3, so an
+L1 miss costs almost nothing: there is no memory latency for the prefetchers to hide.
+They still fetch speculatively, however, and this useless extra traffic (visible as
+\emph{higher} L2 misses with prefetchers on: 84K vs.\ 52K at $128$) gets in the way of
+the real loads.  The runs are also very short (1--17\,ms), so part of the gap is simply
+measurement noise.  The prefetchers only start to matter at size $2048$, below.
 
 At size 512--1024, the two configurations are nearly identical (${\sim}4.4$--$4.6$ GFLOP/s),
 since the working set spans L2 and the hardware prefetcher's benefit roughly cancels
@@ -200,7 +201,7 @@ its overhead.
 
 The hardware prefetcher becomes essential at \textbf{size 2048}: with prefetchers on,
 the naive kernel achieves 3.29 GFLOP/s in 5.2 seconds; with prefetchers off, it drops
-to 1.82 GFLOP/s and takes 9.4 seconds---a $1.81{\times}$ slowdown.
+to 1.82 GFLOP/s and takes 9.4 seconds, a $1.81{\times}$ slowdown.
 LLC misses explode from 34M to 1.19B without prefetching, confirming that at this size
 the working set far exceeds L3 and the hardware streamer is critical for maintaining
 any memory-level parallelism.
