@@ -637,14 +637,15 @@ The combined implementation in \texttt{conv\_optimized.cpp} uses \textbf{AVX2 SI
 \textbf{Techniques combined:}
 \begin{itemize}
     \item \textbf{AVX2 SIMD.} Each vector instruction processes 8 floats via 256-bit FMA.
-    \item \textbf{Multi-accumulator unrolling.} Instead of one vector accumulator per iteration, 4 independent accumulators process 32 output columns per block (4 accumulators $\times$ 8 floats). This breaks the FMA dependency chain, the same mechanism that made \texttt{unroll\_ox} the best scalar strategy.
+    \item \textbf{Multi-accumulator unrolling.} Instead of one vector accumulator per iteration, 8 independent accumulators process 64 output columns per block (8 accumulators $\times$ 8 floats). This breaks the FMA dependency chain, the same mechanism that made \texttt{unroll\_ox} the best scalar strategy.
     \item \textbf{Naive loop order retained.} The per-stage sweeps showed that the reordered loop order is a net loss at large sizes due to multi-pass cache pressure. The naive order (\texttt{oy, ox, ky, kx}) keeps the working set small and avoids the zeroing and read-modify-write overhead.
     \item \textbf{Tiling omitted.} The tiling sweep showed only $1.2\text{--}1.4\times$ improvement and actually increased L1 MPKI. Since the naive order already has good cache behaviour, tiling adds overhead without meaningful benefit.
+    \item \textbf{Cache-aware (non-temporal) stores.} With SIMD and unrolling in place, the large sizes are memory-bound, and a third of the remaining DRAM traffic is read-for-ownership on the write-once output: a regular store first reads the cache line it is about to overwrite. The finished output blocks are therefore written with streaming stores (\texttt{\_mm256\_stream\_ps}), which assemble full lines and send them straight to memory, skipping the ownership read and the cache pollution. This is gated at runtime: it activates only when the output exceeds 8\,MB (too large to stay cache-resident) and the buffer is 32-byte aligned; below the gate, regular stores keep their reuse benefit. One \texttt{\_mm\_sfence} per call orders the stores before the caller reads the result.
 \end{itemize}
 
-These two techniques, SIMD and multi-accumulator unrolling, complement each other because they address different bottlenecks.
+These techniques complement each other because they address different bottlenecks.
 SIMD increases the work per instruction (4--8 multiply-adds instead of 1), while multiple accumulators increase the work per cycle by letting the out-of-order core pipeline independent FMA chains.
-The combination multiplies: SIMD alone (single accumulator) gives ${\sim}4\text{--}9\times$, and adding 4 accumulators on top roughly doubles the throughput again at small sizes.
+The combination compounds: SIMD alone gives ${\sim}4\text{--}9\times$, and the added accumulators and streaming stores lift the combined kernel to ${\sim}13\text{--}15\times$ at $512{\times}512$.
 
 \subsection{Speedup Results}
 
@@ -682,13 +683,13 @@ Matrix Size & K=3 Speedup & K=5 Speedup \\
 
 \textbf{Why combining yields more than the sum of parts.}
 SIMD and multi-accumulator unrolling target independent bottlenecks.
-SIMD increases the useful work per instruction (4--16 multiply-adds instead of 1), but with a single accumulator the FMA dependency chain still limits throughput.
+SIMD increases the useful work per instruction (4--8 multiply-adds instead of 1), but with a single accumulator the FMA dependency chain still limits throughput.
 Unrolling alone (scalar) breaks the dependency chain but processes only one float per FMA.
 Combining them removes both limits simultaneously: each FMA operates on a full vector \emph{and} multiple independent chains keep the FMA units saturated.
-This is a multiplicative effect, which is why the combined optimized version ($20\text{--}25\times$ at small sizes) far exceeds what either technique achieves alone (SIMD alone: ${\sim}12\times$, unroll alone: ${\sim}3\times$).
+This is a compounding effect, which is why the combined optimized version (${\sim}13\text{--}15\times$ at $512{\times}512$) exceeds what either technique achieves alone (SIMD alone: ${\sim}9\times$, unroll alone: ${\sim}3\times$).
 
 \textbf{Best combination.}
-AVX2 with 4 independent accumulators (32 output columns per block) gives the highest peak speedup at $512{\times}512$ for both kernel sizes.
+AVX2 with 8 independent accumulators (64 output columns per block) gives the highest peak speedup at $512{\times}512$ for both kernel sizes.
 The gain is largest for $K{=}5$ due to the higher arithmetic intensity ($2 \times 5^{2} = 50$ flops per pixel).
 
 \textbf{Bottleneck of the best implementation.}
