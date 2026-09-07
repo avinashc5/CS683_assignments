@@ -430,7 +430,7 @@ Stage & Instructions & L1-D Misses & L2 Misses & LLC Misses & IPC \\
 \midrule
 Naive           & \perfNaiveInsns & \perfNaiveLoneDmiss & \perfNaiveLtwoMiss & \perfNaiveLLCmiss & \perfNaiveIPC \\
 SIMD            & \perfSimdInsns & \perfSimdLoneDmiss & \perfSimdLtwoMiss & \perfSimdLLCmiss & \perfSimdIPC \\
-Prefetch (next\_B, T0, d=128)  & -- & \pfNextBTzeroDonetwentyeightTtwentyfourLoneDmiss & \pfNextBTzeroDonetwentyeightTtwentyfourLtwoMiss & \pfNextBTzeroDonetwentyeightTtwentyfourLLCmiss & -- \\
+Prefetch (next\_B, T0, d=128)  & \perfPrefetchInsns & \perfPrefetchLoneDmiss & \perfPrefetchLtwoMiss & \perfPrefetchLLCmiss & \perfPrefetchIPC \\
 SIMD + Blocking & \perfOptimizedInsns & \perfOptimizedLoneDmiss & \perfOptimizedLtwoMiss & \perfOptimizedLLCmiss & \perfOptimizedIPC \\
 \bottomrule
 \end{tabular}%
@@ -439,9 +439,10 @@ SIMD + Blocking & \perfOptimizedInsns & \perfOptimizedLoneDmiss & \perfOptimized
 
 Key observations at $1024$:
 \begin{itemize}[nosep]
-    \item The scalar prefetch kernel (next\_B, T0, distance 128, measured with HW prefetchers off) shows similar L1-D and L2 miss counts to the naive kernel, confirming that the scalar kernel is compute-bound and software prefetch adds negligible benefit even without hardware assistance.
-    \item SIMD reduces instruction count dramatically (by ${\sim}4{\times}$) because each vector instruction processes 8 floats. This is the primary source of speedup at cache-resident sizes.
-    \item The SIMD + Blocking kernel has the lowest cache misses thanks to MC${\times}$NC blocking, \emph{and} the lowest instruction count thanks to SIMD, achieving both benefits simultaneously.
+    \item \textbf{Instruction counts are similar} across naive, SIMD, and SIMD + Blocking (${\sim}39\text{--}40$B), because the total work ($2N^3$ FLOPs) is the same and the compiler's \texttt{-O2} scalar code is already tight. The prefetch kernel is the outlier at 71B due to the extra prefetch instructions injected into the inner loop.
+    \item \textbf{L2 misses dominate} across all stages ($409\text{--}742$M), dwarfing L1-D misses ($23\text{--}43$M) and LLC misses ($77\text{--}240$K). The working set at $1024^3$ (three $4$\,MB matrices) fits in L3 (12\,MB) but far exceeds L2 (2\,MiB), so L2 miss--to--L3 hit traffic is the main memory bottleneck.
+    \item \textbf{SIMD + Blocking achieves the lowest L1-D misses} (35M vs.\ 23M naive, 41M SIMD) and comparable L2 misses to naive (414M vs.\ 409M), showing that the MC${\times}$NC blocking keeps the active panel in L1/L2. Its speedup comes from SIMD throughput (8 FLOPs per vector FMA) combined with cache-friendly access patterns, not from reducing instruction count.
+    \item \textbf{IPC is uniformly high} (${\sim}3.0$) across all stages at this size, indicating that the out-of-order core pipelines the $O(N^3)$ compute loop efficiently regardless of kernel structure. The speedup of the optimized kernel over naive therefore comes from doing more useful work per instruction (vector FMA), not from executing more instructions per cycle.
 \end{itemize}
 
 \subsubsection{SIMD + Blocking Counters Across Sizes}

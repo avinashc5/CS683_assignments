@@ -1,34 +1,6 @@
-# Per-kernel hardware counters, M=N=K=1024, pinned core 3.
-#
-# Measured by bench/perf_stage, which opens the counters with perf_event_open(2) and
-# brackets ONLY the kernel call with IOC_ENABLE/IOC_DISABLE. Process startup,
-# allocation, the mt19937 fill (~1.2e8 instructions) and the checksum all fall
-# outside the counted region. User-mode counts only (exclude_kernel).
-#
-# 'cold' streams a 64 MiB buffer before the region to evict A/B/C; 'warm' does not.
-# The two agree within 2% on every counter, so cache carryover is not a factor here
-# (A+B+C = 12 MiB against a 12 MiB L3 -- the kernels stream through it regardless).
-#
-# Instruction counts cross-checked four ways for simd, all agreeing within 1.4%:
-#   region counting (this file) 2.2886e8 | rep-subtraction 2.2923e8
-#   perf record per-symbol      2.2940e8 | harness subtraction 2.32e8
-#
-# L2-miss uses raw event r3f24 (l2_rqsts.miss on Ice/Tiger Lake); verified identical
-# to perf's named l2_rqsts.miss.
-
-stage       cache    instructions      L1D-miss       L2-miss    LLC-miss     IPC
-naive       cold       6452951452      67218496      67567994       12599    1.52
-naive       warm       6452951400      67215877      67366697        4663    1.53
-simd        cold        228860073      17077579      17105429       33959    2.01
-simd        warm        228860080      17078405      17084404       32621    1.97
-prefetch    cold        330758988      35317236       1315980       12910    1.98
-prefetch    warm        330758989      35318414       1324364       12948    1.97
-optimized   cold        317024417      35366614       1308706       14109    2.19
-optimized   warm        317024418      35379828       1284025       13211    2.18
-
-# derived (cold):
-#   simd cuts instructions 28.2x vs naive (6.453e9 -> 2.289e8)
-#   blocking cuts L2 misses 13.1x (simd 1.711e7 -> optimized 1.309e6)
-#   prefetch/optimized RAISE L1D misses (1.71e7 -> 3.54e7): the prefetch
-#   instructions themselves count as L1 misses when they pull lines in.
-#   IPC rises 1.52 (naive) -> 2.19 (optimized).
+# Per-kernel hardware counters, M=N=K=1024, taskset -c 3
+stage         cache      instructions        L1D-miss         L2-miss      LLC-miss     IPC
+naive         cold        38889201349        23450848       409093098         76922    3.04
+simd          cold        40377996347        40740538       491613647        239655    3.02
+prefetch      cold        71185221659        42491592       741877536         91785    3.05
+optimized     cold        40394316592        35116397       414432335        122597    3.04
