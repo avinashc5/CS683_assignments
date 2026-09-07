@@ -1,16 +1,16 @@
 size              stage           naive_GF/s    stage_GF/s     speedup
 --------------------------------------------------------------------
-128x128x128       optimized             1.97         31.04      16.04x
+128x128x128       optimized             2.10         32.36      15.38x
 
-256x256x256       optimized             1.82         32.28      19.16x
+256x256x256       optimized             1.99         35.39      17.78x
 
-512x512x512       optimized             4.25        101.10      23.36x
+512x512x512       optimized             4.61        109.87      23.83x
 
-768x768x768       optimized             4.30        110.63      25.84x
+768x768x768       optimized             4.45        123.18      27.68x
 
-1024x1024x1024    optimized             4.14         90.52      21.82x
+1024x1024x1024    optimized             4.38        111.71      25.53x
 
-1536x1536x1536    optimized             1.53         97.98      64.18x
+1536x1536x1536    optimized             3.32        109.63      32.98x
 
-2048x2048x2048    optimized             2.99         90.82      29.91x
+2048x2048x2048    optimized             3.78        103.89      27.50x
 

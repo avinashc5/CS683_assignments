@@ -91,9 +91,12 @@ Matrix Size & Naive GFLOP/s & Best Prefetch GFLOP/s & Best Speedup \\
 \end{tabular}
 \end{table}
 
+All measurements in this section were collected with \textbf{hardware prefetchers disabled}
+(MSR \texttt{0x1A4} = \texttt{0xF}) to isolate the effect of software prefetching alone.
+
 Software prefetching provides only marginal benefit on this scalar kernel (${<}1.07{\times}$ at all sizes).
-The naive loop is memory-bound at large sizes, but the hardware L2 streamer on this CPU already detects and prefetches the sequential access patterns in $A$ and $B$.
-Adding explicit prefetch instructions introduces overhead (extra instructions, potential cache pollution) that nearly cancels any latency-hiding benefit.
+The scalar triple loop is \emph{compute-bound}: each output element requires $K$ multiply-accumulate iterations processed one float at a time, and the CPU's out-of-order engine can overlap demand misses with the long instruction stream.
+Adding explicit prefetch instructions introduces overhead (extra $\mu$ops competing for execution ports) that nearly cancels any latency-hiding benefit.
 
 \subsection{CPU Metrics Analysis}
 
@@ -108,7 +111,7 @@ Key observations from the cache miss data:
     \item \textbf{L1-D misses decrease slightly} with next\_B prefetching (e.g.\ at 1024: 732M $\rightarrow$ 690M for dist=128), because the prefetch pulls the next $B$ row into L1 before demand.
     \item \textbf{L2 misses are unchanged} (${\sim}745$M at 1024) because the working set far exceeds L2 regardless of prefetching.
     \item \textbf{LLC misses are similar} across configurations, confirming that the bottleneck is DRAM bandwidth, not cache miss latency.
-    \item \textbf{Within-row prefetching (mode 1) increases instruction count dramatically} (681M+ \texttt{sw\_prefetch\_access} at 1024) without reducing misses, because the hardware prefetcher already handles the sequential stride.
+    \item \textbf{Within-row prefetching (mode 1) increases instruction count dramatically} (681M+ \texttt{sw\_prefetch\_access} at 1024) without reducing misses, because the prefetch instructions consume execution-port bandwidth that the compute loop needs.
 \end{itemize}
 
 \subsection{Execution Time and Speedup}
@@ -157,20 +160,19 @@ NTA (non-temporal) performs similarly to T0 at large sizes but offers no advanta
     \item \textbf{Best cache fill level}: \texttt{\_MM\_HINT\_T0} (L1).
 \end{itemize}
 
-However, even the best configuration achieves only ${\sim}1.03$--$1.06{\times}$ speedup.
-On this hardware, the L2 hardware streamer is effective enough that explicit software prefetching adds negligible value to a scalar kernel with sequential access patterns.
+However, even the best configuration achieves only ${\sim}1.03$--$1.06{\times}$ speedup, even with hardware prefetchers disabled.
+The scalar kernel is compute-bound: the CPU spends most cycles retiring scalar multiply-accumulate instructions, not stalling on cache misses, so there is little memory latency for software prefetching to hide.
 
 \subsection{Effect of Hardware Prefetchers}
 
-\todo{Requires toggling hardware prefetchers via MSR registers (\texttt{wrmsr 0x1A4}) or BIOS settings, then re-running the sweep. To be completed if MSR access is available.}
+\todo{Run \texttt{bench/run\_hwpf\_experiment.sh} (requires \texttt{sudo} and \texttt{msr-tools}) to collect the HW-prefetchers-ON counterpart. The sweep above was measured with all four hardware prefetchers disabled (MSR \texttt{0x1A4 = 0xF}). The experiment re-enables them (individually and all at once) and compares GFLOP/s and cache misses to quantify how much the L2 streamer, L2 adjacent-line, DCU, and DCU-IP prefetchers contribute.}
 
 \subsection{Analysis Questions}
 
 \subsubsection{Q1: Speedup Trend with Matrix Size}
 
-Prefetch speedup is nearly flat across matrix sizes, staying in the $1.00$--$1.06{\times}$ range for the best mode (next\_B).
-This is because the kernel's performance bottleneck transitions from compute (small sizes, data in cache) to memory bandwidth (large sizes, data in DRAM), and software prefetching helps with neither:
-at small sizes the data is already in cache, and at large sizes the hardware prefetcher already handles the sequential access pattern.
+Prefetch speedup is nearly flat across matrix sizes, staying in the $1.00$--$1.06{\times}$ range for the best mode (next\_B), even with hardware prefetchers disabled.
+The scalar kernel is compute-bound at all sizes: at small sizes the data fits in cache so there are few misses to hide; at large sizes the out-of-order engine overlaps the long scalar instruction stream with demand misses, leaving little exposed latency for software prefetch to cover.
 
 \subsubsection{Q2: Best Prefetch Distance}
 
@@ -401,7 +403,7 @@ Prefetch + SIMD & \perfOptimizedInsns & \perfOptimizedLoneDmiss & \perfOptimized
 
 Key observations:
 \begin{itemize}[nosep]
-    \item The scalar prefetch kernel (next\_B, T0, distance 128) shows similar L1-D and L2 miss counts to the naive kernel, confirming that the hardware prefetcher already handles the sequential access patterns effectively.
+    \item The scalar prefetch kernel (next\_B, T0, distance 128, measured with HW prefetchers off) shows similar L1-D and L2 miss counts to the naive kernel, confirming that the scalar kernel is compute-bound and software prefetch adds negligible benefit even without hardware assistance.
     \item SIMD reduces instruction count dramatically (by ${\sim}4{\times}$) because each vector instruction processes 8 floats. This is the primary source of speedup at cache-resident sizes.
     \item The combined kernel (Prefetch + SIMD) has the lowest cache misses thanks to its MC${\times}$NC blocking, \emph{and} the lowest instruction count thanks to SIMD --- achieving both benefits simultaneously.
 \end{itemize}
@@ -450,16 +452,35 @@ Matrix Size & SIMD (AVX2) & Prefetch (scalar) & SIMD + Blocking \\
 
 \subsection{Analysis: Synergy Between Techniques}
 
-The three techniques target fundamentally different bottlenecks, and the comparison plot shows this clearly:
+\textbf{Note:} speedup numbers are not directly comparable across techniques because each benchmark run produces its own naive baseline (run-to-run variance in naive is ${\sim}2$--$4{\times}$ GFLOP/s).
+The GFLOP/s column is the reliable cross-technique comparison.
+
+\begin{table}[H]
+\centering
+\caption{GFLOP/s by technique across matrix sizes (higher is better)}
+\begin{tabular}{lrrrr}
+\toprule
+Size & Naive & SIMD (AVX2) & Prefetch (scalar) & SIMD + Blocking \\
+\midrule
+128  & \simdWidthNaiveOhtwentyeightGflops & \simdWidthAVXOhtwentyeightGflops & \pfNextBTzeroDonetwentyeightOhtwentyeightGflops & \optSweepOhtwentyeightGflops \\
+256  & \simdWidthNaiveTwofiftysixGflops & \simdWidthAVXTwofiftysixGflops & \pfNextBTzeroDsixteenTwofiftysixGflops & \optSweepTwofiftysixGflops \\
+512  & \simdWidthNaiveFtwelveGflops & \simdWidthAVXFtwelveGflops & \pfNextBTzeroDonetwentyeightFtwelveGflops & \optSweepFtwelveGflops \\
+1024 & \simdWidthNaiveTtwentyfourGflops & \simdWidthAVXTtwentyfourGflops & \pfNextBTzeroDonetwentyeightTtwentyfourGflops & \optSweepTtwentyfourGflops \\
+2048 & \simdWidthNaiveTfortyeightGflops & \simdWidthAVXTfortyeightGflops & \pfNoneNADNATfortyeightGflops & \optSweepTfortyeightGflops \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The three techniques target fundamentally different bottlenecks:
 
 \begin{itemize}[nosep]
-    \item \textbf{SIMD (AVX2)} achieves \simdWidthAVXFtwelveSpeedup{} at $512$ (\simdWidthAVXFtwelveGflops{} GFLOP/s) by processing 8 floats per instruction. At $2048$, it drops to \simdWidthAVXTfortyeightSpeedup{} as the operands spill out of L2 and every row re-streams from DRAM --- SIMD removes the compute bottleneck but not the memory bottleneck.
+    \item \textbf{SIMD (AVX2)} achieves \simdWidthAVXFtwelveGflops{} GFLOP/s at $512$ by processing 8 floats per FMA. At small sizes ($128$--$256$) where the working set fits in L2, SIMD-only is the fastest technique (\simdWidthAVXOhtwentyeightGflops{} GFLOP/s at $128$) because there is no cache-miss bottleneck and the B-packing overhead of the combined kernel is pure cost. At $2048$, it drops to \simdWidthAVXTfortyeightGflops{} GFLOP/s because the operands spill out of L2.
 
-    \item \textbf{Prefetch (scalar)} provides negligible benefit: the best configuration (next\_B, T0, distance 128) achieves only ${\sim}1.03$--$1.06{\times}$ speedup at all sizes. The scalar kernel is compute-bound, not memory-bound, so hiding memory latency has minimal impact.
+    \item \textbf{Prefetch (scalar)} provides negligible benefit: the best configuration achieves ${\sim}1.03$--$1.06{\times}$ speedup at all sizes. The scalar kernel is compute-bound, not memory-bound.
 
-    \item \textbf{SIMD + Blocking} combines the 6${\times}$16 AVX2 micro-kernel with MC${\times}$NC cache blocking and B-panel packing. It reaches \optSweepFtwelveGflops{} GFLOP/s at $512$ (\optSweepFtwelveSpeedup) and sustains \optSweepTfortyeightGflops{} GFLOP/s at $2048$ (\optSweepTfortyeightSpeedup) --- whereas SIMD-only drops to \simdWidthAVXTfortyeightGflops{} GFLOP/s at the same size. The blocking keeps the operands in L2, so the SIMD units stay fed.
+    \item \textbf{SIMD + Blocking} pays a fixed overhead for B-panel packing, which hurts at small sizes (\optSweepOhtwentyeightGflops{} GFLOP/s at $128$ vs.\ \simdWidthAVXOhtwentyeightGflops{} for SIMD-only). The crossover occurs around $512$, where the packing cost is amortized and the MC${\times}$NC blocking keeps the packed panel resident in L2. From $512$ onward, the combined kernel dominates: \optSweepFtwelveGflops{} GFLOP/s at $512$, \optSweepTtwentyfourGflops{} at $1024$, and \optSweepTfortyeightGflops{} at $2048$ --- while SIMD-only drops to \simdWidthAVXTfortyeightGflops{} at $2048$.
 
-    \item The synergy is \emph{complementary}, not additive: SIMD without blocking is compute-efficient but memory-bound at large sizes; blocking without SIMD (the prefetch stage) keeps data cache-resident but is limited by scalar throughput; together, both bottlenecks are addressed simultaneously.
+    \item The synergy is \emph{complementary}: SIMD removes the compute bottleneck (fewer instructions per FLOP); blocking removes the memory bottleneck (data stays in L2). Neither alone achieves both. The combined kernel sustains $>$100 GFLOP/s from $512$ through $2048$, while SIMD-only loses half its throughput at $2048$ and prefetch-only never exceeds the naive baseline by more than ${\sim}6\%$.
 \end{itemize}
 
 \end{document}
