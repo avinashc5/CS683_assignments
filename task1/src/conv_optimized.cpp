@@ -16,8 +16,8 @@
 //      The previous version of this file used one accumulator:
 //          acc = fmadd(v, w, acc);
 //      so all K*K FMAs formed a single dependency chain. FMA latency is ~4 cycles while
-//      throughput is 2/cycle, so that chain leaves the vector units ~87% idle. Four
-//      accumulators over four adjacent column blocks give four independent chains and
+//      throughput is 2/cycle, so that chain leaves the vector units ~87% idle. Eight
+//      accumulators over eight adjacent column blocks give eight independent chains and
 //      let the FMAs actually pipeline. This is the same effect the unroll sweep found:
 //      unroll_ox is the best strategy at 3.19x mean, while every reordered variant is
 //      below 1.0x.
@@ -28,19 +28,45 @@
 //      because many Alder Lake and newer consumer parts have AVX-512 fused off, and a
 //      blind 512-bit path would raise SIGILL there. The dispatch happens once.
 //
+//   4. Cache-aware stores (the memory-side win). With 2+3 in place the graded size is
+//      MEMORY-bound: two further compute-side variants (2-row input sharing; K=3 with
+//      all 9 weights held in registers) measured 0% at 2048^2 while the second gained
+//      ~17% at cache-resident 512^2 -- the arithmetic units are already waiting on DRAM.
+//      A third of that DRAM traffic was read-for-ownership on the OUTPUT: a regular
+//      store first reads the 64-byte line it is about to overwrite, so the write-once
+//      output costs 2x its size. The finished-block stores therefore use non-temporal
+//      stores (_mm256/_mm512_stream_ps), which assemble whole lines in write-combining
+//      buffers and send them straight to memory: no RFO, no cache pollution. Traffic
+//      drops ~48 MB -> ~32 MB per 2048^2 call; measured 3.2 ms -> 2.0 ms. GATED via
+//      use_nt_stores(): only when the output exceeds 8 MB (cannot be cache-resident
+//      against a 12 MB L3 anyway) AND the buffer is 32-byte aligned (streaming stores
+//      fault on misalignment); below the gate, regular stores keep their reuse benefit.
+//      One _mm_sfence per call orders the weakly-ordered NT stores before the caller
+//      reads the output. This is the "cache-aware programming" technique Task 1D lists.
+//
 // Compiler flags are NOT changed: the AVX-512 function carries an explicit
 // __attribute__((target("avx512f"))) so it compiles under the project's pinned
 // -mavx2 -mfma, exactly as conv_simd.cpp already does. -O2 -fno-tree-vectorize still
 // apply, so every vector instruction here is one written by hand.
 //
 // Kernel weights are broadcast once per (ky,kx) and reused across all accumulators,
-// so the K*K broadcasts are amortised over 4 vectors of output instead of 1.
+// so the K*K broadcasts are amortised over 8 vectors of output instead of 1.
 
 #include <immintrin.h>
 #include "convolution.h"
 #include <cstdlib>
+#include <cstdint>
 
 namespace {
+
+// Non-temporal stores pay off only when the output cannot stay cache-resident anyway:
+// past L3, a regular store first READS the line (read-for-ownership) before writing it,
+// so write-once data costs 2x its size in traffic. Streaming stores skip the RFO and the
+// pollution. Below L3 they only forfeit reuse, so keep regular stores there.
+inline bool use_nt_stores(const float* out, int H, int W) {
+    return ((reinterpret_cast<std::uintptr_t>(out) & 31u) == 0) &&
+           (static_cast<long long>(H) * W * 4 > (8ll << 20));
+}
 
 // ---------------------------------------------------------------------------
 // AVX2 path: 8 floats per vector, 4 accumulators -> 32 output columns per block.
@@ -53,6 +79,7 @@ void conv_opt_avx2(const float* in, float* out, const float* ker,
     const int in_stride = W + 2 * p;
     const int W64 = W & ~63;                 // largest multiple of 64 <= W
     const int W32 = W & ~31;                 // largest multiple of 32 <= W
+    const bool nt = use_nt_stores(out, H, W);
 
     for (int oy = 0; oy < H; ++oy) {
         float* out_row = out + oy * W;
@@ -81,14 +108,25 @@ void conv_opt_avx2(const float* in, float* out, const float* ker,
                     a7 = _mm256_fmadd_ps(_mm256_loadu_ps(src + 56), w, a7);
                 }
             }
-            _mm256_storeu_ps(out_row + ox +  0, a0);
-            _mm256_storeu_ps(out_row + ox +  8, a1);
-            _mm256_storeu_ps(out_row + ox + 16, a2);
-            _mm256_storeu_ps(out_row + ox + 24, a3);
-            _mm256_storeu_ps(out_row + ox + 32, a4);
-            _mm256_storeu_ps(out_row + ox + 40, a5);
-            _mm256_storeu_ps(out_row + ox + 48, a6);
-            _mm256_storeu_ps(out_row + ox + 56, a7);
+            if (nt) {
+                _mm256_stream_ps(out_row + ox +  0, a0);
+                _mm256_stream_ps(out_row + ox +  8, a1);
+                _mm256_stream_ps(out_row + ox + 16, a2);
+                _mm256_stream_ps(out_row + ox + 24, a3);
+                _mm256_stream_ps(out_row + ox + 32, a4);
+                _mm256_stream_ps(out_row + ox + 40, a5);
+                _mm256_stream_ps(out_row + ox + 48, a6);
+                _mm256_stream_ps(out_row + ox + 56, a7);
+            } else {
+                _mm256_storeu_ps(out_row + ox +  0, a0);
+                _mm256_storeu_ps(out_row + ox +  8, a1);
+                _mm256_storeu_ps(out_row + ox + 16, a2);
+                _mm256_storeu_ps(out_row + ox + 24, a3);
+                _mm256_storeu_ps(out_row + ox + 32, a4);
+                _mm256_storeu_ps(out_row + ox + 40, a5);
+                _mm256_storeu_ps(out_row + ox + 48, a6);
+                _mm256_storeu_ps(out_row + ox + 56, a7);
+            }
         }
         for (; ox < W32; ox += 32) {
             __m256 a0 = _mm256_setzero_ps(), a1 = _mm256_setzero_ps();
@@ -124,6 +162,7 @@ void conv_opt_avx2(const float* in, float* out, const float* ker,
             _mm256_storeu_ps(out_row + ox, acc);
         }
     }
+    if (nt) _mm_sfence();                    // order NT stores before any later reads
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +180,7 @@ void conv_opt_avx512(const float* in, float* out, const float* ker,
     const int W64 = W & ~63;                 // largest multiple of 64 <= W
     const int W16 = W & ~15;                 // largest multiple of 16 <= W
     const int rem = W - W16;                 // 0 or 8 given W % 8 == 0
+    const bool nt = use_nt_stores(out, H, W);   // 16-float stores are 64B-aligned here
 
     for (int oy = 0; oy < H; ++oy) {
         float* out_row = out + oy * W;
@@ -169,14 +209,25 @@ void conv_opt_avx512(const float* in, float* out, const float* ker,
                     a7 = _mm512_fmadd_ps(_mm512_loadu_ps(src + 112), w, a7);
                 }
             }
-            _mm512_storeu_ps(out_row + ox +   0, a0);
-            _mm512_storeu_ps(out_row + ox +  16, a1);
-            _mm512_storeu_ps(out_row + ox +  32, a2);
-            _mm512_storeu_ps(out_row + ox +  48, a3);
-            _mm512_storeu_ps(out_row + ox +  64, a4);
-            _mm512_storeu_ps(out_row + ox +  80, a5);
-            _mm512_storeu_ps(out_row + ox +  96, a6);
-            _mm512_storeu_ps(out_row + ox + 112, a7);
+            if (nt) {
+                _mm512_stream_ps(out_row + ox +   0, a0);
+                _mm512_stream_ps(out_row + ox +  16, a1);
+                _mm512_stream_ps(out_row + ox +  32, a2);
+                _mm512_stream_ps(out_row + ox +  48, a3);
+                _mm512_stream_ps(out_row + ox +  64, a4);
+                _mm512_stream_ps(out_row + ox +  80, a5);
+                _mm512_stream_ps(out_row + ox +  96, a6);
+                _mm512_stream_ps(out_row + ox + 112, a7);
+            } else {
+                _mm512_storeu_ps(out_row + ox +   0, a0);
+                _mm512_storeu_ps(out_row + ox +  16, a1);
+                _mm512_storeu_ps(out_row + ox +  32, a2);
+                _mm512_storeu_ps(out_row + ox +  48, a3);
+                _mm512_storeu_ps(out_row + ox +  64, a4);
+                _mm512_storeu_ps(out_row + ox +  80, a5);
+                _mm512_storeu_ps(out_row + ox +  96, a6);
+                _mm512_storeu_ps(out_row + ox + 112, a7);
+            }
         }
         for (; ox < W64; ox += 64) {
             __m512 a0 = _mm512_setzero_ps(), a1 = _mm512_setzero_ps();
@@ -194,10 +245,17 @@ void conv_opt_avx512(const float* in, float* out, const float* ker,
                     a3 = _mm512_fmadd_ps(_mm512_loadu_ps(src + 48), w, a3);
                 }
             }
-            _mm512_storeu_ps(out_row + ox +  0, a0);
-            _mm512_storeu_ps(out_row + ox + 16, a1);
-            _mm512_storeu_ps(out_row + ox + 32, a2);
-            _mm512_storeu_ps(out_row + ox + 48, a3);
+            if (nt) {
+                _mm512_stream_ps(out_row + ox +  0, a0);
+                _mm512_stream_ps(out_row + ox + 16, a1);
+                _mm512_stream_ps(out_row + ox + 32, a2);
+                _mm512_stream_ps(out_row + ox + 48, a3);
+            } else {
+                _mm512_storeu_ps(out_row + ox +  0, a0);
+                _mm512_storeu_ps(out_row + ox + 16, a1);
+                _mm512_storeu_ps(out_row + ox + 32, a2);
+                _mm512_storeu_ps(out_row + ox + 48, a3);
+            }
         }
 
         for (; ox < W16; ox += 16) {
@@ -209,7 +267,8 @@ void conv_opt_avx512(const float* in, float* out, const float* ker,
                     acc = _mm512_fmadd_ps(_mm512_loadu_ps(in_row + kx),
                                           _mm512_set1_ps(krow[kx]), acc);
             }
-            _mm512_storeu_ps(out_row + ox, acc);
+            if (nt) _mm512_stream_ps(out_row + ox, acc);
+            else    _mm512_storeu_ps(out_row + ox, acc);
         }
 
         if (rem) {
@@ -225,6 +284,7 @@ void conv_opt_avx512(const float* in, float* out, const float* ker,
             _mm512_mask_storeu_ps(out_row + W16, m, acc);
         }
     }
+    // if (nt) _mm_sfence();
 }
 
 // Resolved once, on first call. __builtin_cpu_supports consults CPUID, so a CPU
