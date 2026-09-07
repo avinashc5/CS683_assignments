@@ -427,12 +427,17 @@ Each combination was swept across tile heights (8--256), tile widths (32--256 fo
 \caption{Best speedup per tiling mode across matrix sizes (K=5).}
 \end{figure}
 
-The naive-order modes consistently outperform or match the reordered modes.
-\textbf{Naive + Column} is the clear winner: it achieves a small but consistent speedup without the L1 MPKI penalty of the reordered variants.
-This is because the naive order already has near-optimal cache behavior --- it touches only $K$ input rows per output row and writes each output once.
-Column tiling on top of it simply bounds the row-strip height, which helps at very large matrix sizes.
+For K=3, \textbf{Reorder + Square} is the clear winner at small sizes, reaching $3.46{\times}$
+at 512 where the square tile keeps the output block in L1 and the reordered loop amortizes
+all $K^{2}$ weight loads across the tile.  It sustains ${\sim}1.15$--$1.18{\times}$ at larger
+sizes as well.  \textbf{Naive + Square} peaks at 1024 ($1.62{\times}$) and 4096 ($1.25{\times}$).
+\textbf{Naive + Column} provides a modest $1.07$--$1.27{\times}$ but is the weakest mode overall.
 
-Square tiling in both loop orders adds overhead from the extra tile-boundary bookkeeping and, for the reordered case, forces the output to be zeroed and accumulated in smaller blocks that reduce spatial locality.
+For K=5 the reordered modes pull further ahead: \textbf{Reorder + Square} sustains
+$1.18$--$1.60{\times}$ across all sizes, while \textbf{Reorder + Column} reaches $1.97{\times}$
+at 8192.  The naive-order modes actually show slight slowdowns ($< 1.0{\times}$) at most K=5
+sizes because the column/square tile cannot reduce the larger $K^{2}$ input footprint enough
+to compensate for the tiling overhead.
 
 \subsubsection{MPKI Comparison Across Modes}
 
@@ -442,8 +447,14 @@ Square tiling in both loop orders adds overhead from the extra tile-boundary boo
 \caption{L1-D MPKI comparison across tiling modes at best tile config (K=3).}
 \end{figure}
 
-The reordered modes show $4\text{--}5\times$ higher L1-D MPKI than the naive modes, confirming that the $K^{2}$ passes over the output strip cause systematic L1 thrashing.
-The naive-order modes maintain MPKI close to the untiled baseline because they preserve the single-pass output access pattern.
+The reordered modes show $4$--$6{\times}$ higher L1-D MPKI than the naive modes, confirming that
+the $K^{2}$ passes over the output tile cause systematic L1 thrashing.
+Despite this, Reorder + Square still achieves the highest speedups (see above), because the
+weight-reuse benefit of hoisting the kernel loops outweighs the extra L1 misses---those misses
+hit in L2 rather than going to main memory.
+The naive-order modes maintain MPKI close to the untiled baseline because they preserve the
+single-pass output access pattern, but gain less from tiling since the naive order already
+has reasonable locality.
 
 \subsubsection{Square Tiling Heatmaps}
 
@@ -455,14 +466,21 @@ The naive-order modes maintain MPKI close to the untiled baseline because they p
 \caption{Speedup heatmaps for square tiling at $2048{\times}2048$, K=3. Left: Naive + Square. Right: Reorder + Square. Values $<1.0$ indicate slowdown.}
 \end{figure}
 
-The heatmaps reveal that square tiling rarely helps: most tile-height/tile-width combinations produce speedups near or below $1.0\times$.
-Reordered + Square is the worst strategy, with many configurations showing significant slowdowns.
+The heatmaps show that the speedup is sensitive to tile dimensions.
+For Reorder + Square, small tile heights with wide tiles (e.g.\ $32{\times}256$) perform best, while
+many other combinations show little benefit or slight slowdowns.
+Naive + Square is less sensitive but also less rewarding---most configurations cluster near $1.0{\times}$.
 
 \subsubsection{Key Takeaway}
 
-Tiling is most effective when it works \emph{with} the natural access pattern, not against it.
-The naive loop order already streams input rows sequentially; column tiling restricts the vertical extent and keeps the working set bounded, yielding a modest but reliable improvement.
-Reordering the loops to hoist kernel weights sacrifices this streaming property in exchange for fewer weight loads --- a trade-off that only pays off at small matrix sizes and rapidly degrades as caches overflow.
+Loop reordering combined with square tiling is the most effective strategy, especially as
+$K$ grows: hoisting the kernel loops outermost amortizes $K^{2}$ weight loads across the
+tile, and the square tile bounds the output working set.  The trade-off is higher L1 MPKI
+from repeated output-tile passes, but these misses are absorbed by L2.
+For K=3 the benefit is dramatic at small sizes ($3.46{\times}$ at 512) and moderate elsewhere;
+for K=5 the reordered modes dominate at all sizes.
+The naive-order modes, while cache-friendlier (lower MPKI), gain little from tiling because
+the naive loop already has reasonable spatial locality.
 
 % ============================================================================
 \section{Task 1C: SIMD (2 points)}
