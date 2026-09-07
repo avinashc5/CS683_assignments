@@ -29,21 +29,19 @@ Matrix Multiplication for Inference}
 % ============================================================================
 
 \begin{itemize}
-    \item \textbf{CPU:} Intel Core i5-11400H (Tiger Lake-H), 6 cores / 6 threads
-          (SMT disabled), all identical P-cores, base 2.70 GHz, max 4.50 GHz
-    \item \textbf{L1-D Cache:} 48 KiB per core (288 KiB total, 6 instances),
-          64-byte lines, 12-way set associative
-    \item \textbf{L2 Cache:} 1.25 MiB per core (7.5 MiB total, 6 instances), 20-way
-    \item \textbf{L3 Cache:} 12 MiB (1 instance, shared), 8-way
-    \item \textbf{Vector ISA:} AVX2 + FMA and AVX-512
-          (\texttt{avx512f}, \texttt{avx512dq}, \texttt{avx512bw}, \texttt{avx512vl},
-          \texttt{avx512\_vnni})
+    \item \textbf{CPU:} Intel Core Ultra 5 125U (Meteor Lake), hybrid architecture:
+          2 P-cores (4 threads with HT, max 4.30 GHz) + 8 E-cores (max 3.60 GHz) +
+          2 LP E-cores (max 2.10 GHz), 14 logical CPUs total
+    \item \textbf{L1-D Cache (P-core):} 48 KiB per core, 64-byte lines, 12-way set associative
+    \item \textbf{L2 Cache (P-core):} 2 MiB per core, 16-way
+    \item \textbf{L3 Cache:} 12 MiB (1 instance, shared), 12-way
+    \item \textbf{Vector ISA:} AVX2 + FMA, AVX-VNNI (no AVX-512)
     \item \textbf{Compiler flags:} \texttt{-std=c++17 -O2 -fno-tree-vectorize -mavx2 -mfma}
-    \item \textbf{OS:} Ubuntu 24.04.4 LTS, kernel 6.8.0-138-generic (x86\_64)
-    \item \textbf{Pinning:} \texttt{taskset -c 3}. This CPU is not hybrid, so every core
-          is equivalent; a single fixed core is used so all measurements share one
-          cache and frequency context.
-    \item \textbf{Frequency governor:} \texttt{performance}, with
+    \item \textbf{OS:} Ubuntu 26.04.1 LTS, kernel 7.0.0-31-generic (x86\_64)
+    \item \textbf{Pinning:} \texttt{taskset -c 3} (a P-core). On this hybrid CPU,
+          \texttt{perf} reports both \texttt{cpu\_core/} and \texttt{cpu\_atom/} events;
+          all hardware counter measurements use the \texttt{cpu\_core/} prefix.
+    \item \textbf{Frequency governor:} \texttt{powersave}, with
           \texttt{kernel.perf\_event\_paranoid = -1} so \texttt{perf} can read the
           hardware counters used for cache miss and instruction count measurements.
 \end{itemize}
@@ -165,7 +163,47 @@ The scalar kernel is compute-bound: the CPU spends most cycles retiring scalar m
 
 \subsection{Effect of Hardware Prefetchers}
 
-\todo{Run \texttt{bench/run\_hwpf\_experiment.sh} (requires \texttt{sudo} and \texttt{msr-tools}) to collect the HW-prefetchers-ON counterpart. The sweep above was measured with all four hardware prefetchers disabled (MSR \texttt{0x1A4 = 0xF}). The experiment re-enables them (individually and all at once) and compares GFLOP/s and cache misses to quantify how much the L2 streamer, L2 adjacent-line, DCU, and DCU-IP prefetchers contribute.}
+To isolate the effect of the hardware prefetchers, we ran the naive scalar kernel
+with all four hardware prefetchers enabled (MSR \texttt{0x1A4 = 0x0}) and disabled
+(MSR \texttt{0x1A4 = 0xF}) across five matrix sizes.
+
+\begin{table}[H]
+\centering
+\caption{Naive kernel: hardware prefetchers ON vs.\ OFF}
+\label{tab:hwpf}
+\begin{tabular}{r rr rr rr rr rr}
+\toprule
+& \multicolumn{2}{c}{Time (ms)} & \multicolumn{2}{c}{GFLOP/s} & \multicolumn{2}{c}{L1-D Misses} & \multicolumn{2}{c}{L2 Misses} & \multicolumn{2}{c}{LLC Misses} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}\cmidrule(lr){10-11}
+Size & ON & OFF & ON & OFF & ON & OFF & ON & OFF & ON & OFF \\
+\midrule
+128  &     1.97 &     1.08 &  2.13 &  3.87 &       70K &     1.4M &      84K &      52K &       4K &       6K \\
+256  &    16.78 &    10.61 &  2.00 &  3.16 &      286K &    11.4M &     189K &     111K &       5K &      15K \\
+512  &    58.62 &    60.74 &  4.58 &  4.42 &     2.9M &    90.9M &    1.3M &    1.0M &      10K &     163K \\
+1024 &   491.36 &   508.48 &  4.37 &  4.22 &    42.5M &   732.2M &  745.6M &  747.4M &     105K &    1.1M \\
+2048 & 5{,}217 & 9{,}418 &  3.29 &  1.82 &   218.4M & 5{,}897M & 6{,}250M & 6{,}030M &   33.9M & 1{,}188M \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+At small sizes (128--256), the naive kernel is actually \emph{faster} with hardware
+prefetchers \textbf{off}.  This is counterintuitive but explained by the L1-D miss
+counts: with prefetchers on, the L1 records ${\sim}70$K--$286$K misses at these sizes
+(prefetch-triggered fills that get counted as misses), whereas with prefetchers off the
+miss count is much higher (${\sim}1.4$M--$11$M) but the data already fits in L2/L3,
+so the actual stall cost is low.  The prefetcher's speculative traffic pollutes the
+small L1 cache and causes more evictions than it prevents.
+
+At size 512--1024, the two configurations are nearly identical (${\sim}4.4$--$4.6$ GFLOP/s),
+since the working set spans L2 and the hardware prefetcher's benefit roughly cancels
+its overhead.
+
+The hardware prefetcher becomes essential at \textbf{size 2048}: with prefetchers on,
+the naive kernel achieves 3.29 GFLOP/s in 5.2 seconds; with prefetchers off, it drops
+to 1.82 GFLOP/s and takes 9.4 seconds---a $1.81{\times}$ slowdown.
+LLC misses explode from 34M to 1.19B without prefetching, confirming that at this size
+the working set far exceeds L3 and the hardware streamer is critical for maintaining
+any memory-level parallelism.
 
 \subsection{Analysis Questions}
 

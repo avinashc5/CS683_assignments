@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
-# run_hwpf_experiment.sh  Measure SGEMM with hardware prefetchers ON.
+# run_hwpf_experiment.sh  Measure naive SGEMM with hardware prefetchers ON vs OFF.
 #
 # The prefetch_sweep_results.txt was collected with HW prefetchers DISABLED.
-# This script collects the HW-ON counterpart so we can compare.
-#
-# Runs the scalar prefetch kernel (best config: next_B, T0, dist=128) and
-# the no-prefetch baseline, both with HW prefetchers enabled (MSR 0x1A4 = 0x0).
-# Also tests with individual HW prefetchers enabled one at a time (rest off)
-# to isolate which one matters.
+# This script measures the naive (no SW prefetch) kernel with HW prefetchers
+# ON and OFF to quantify how much the hardware prefetcher helps.
 #
 # MSR 0x1A4 bits (1 = disabled):
 #   bit 0: L2 hardware prefetcher (streamer)
@@ -45,28 +41,15 @@ CORE=3
 SIZES=(128 256 512 1024 2048)
 
 mkdir -p "$BIN_DIR"
-echo ">>> building prefetch kernel (mode=2, dist=128, hint=T0)"
-$CXX $CXXFLAGS -DPF_MODE=2 -DPF_DIST=128 -DPF_HINT=_MM_HINT_T0 $SRC -o "$BIN_DIR/matmul_pf"
-
-echo ">>> building no-prefetch kernel (mode=0)"
+echo ">>> building kernel (mode=0, no SW prefetch)"
 $CXX $CXXFLAGS -DPF_MODE=0 $SRC -o "$BIN_DIR/matmul_nopf"
 
 PERF_EVENTS="cpu_core/L1-dcache-load-misses/,cpu_core/l2_rqsts.miss/,cpu_core/LLC-load-misses/"
 
-# HW prefetcher configurations:
-#   all_hw_off  = 0xF  (baseline — matches prefetch_sweep_results.txt conditions)
-#   all_hw_on   = 0x0  (the main comparison)
-#   only_L2_str = 0xE  (only L2 streamer enabled, rest off)
-#   only_L2_adj = 0xD  (only L2 adjacent enabled)
-#   only_DCU    = 0xB  (only DCU prefetcher enabled)
-#   only_DCU_ip = 0x7  (only DCU IP prefetcher enabled)
+# Two configurations: HW prefetchers ON vs OFF
 declare -a CONFIGS=(
-    "all_hw_off         0xF"
-    "all_hw_on          0x0"
-    "only_L2_streamer   0xE"
-    "only_L2_adjacent   0xD"
-    "only_DCU_pf        0xB"
-    "only_DCU_ip        0x7"
+    "hw_on    0x0"
+    "hw_off   0xF"
 )
 
 set_hwpf() { wrmsr -a 0x1A4 "$1"; }
@@ -79,9 +62,9 @@ cleanup() {
 trap cleanup EXIT
 
 {
-    printf "%-18s  %-12s  %6s  %5s  %10s  %10s  %8s  %14s  %14s  %14s\n" \
-        "hw_config" "sw_pf" "size" "MSR" "naive_GF/s" "kern_GF/s" "speedup" "L1D_miss" "L2_miss" "LLC_miss"
-    printf '%s\n' "$(printf '=%.0s' {1..140})"
+    printf "%-10s  %6s  %5s  %10s  %10s  %14s  %14s  %14s\n" \
+        "hw_config" "size" "MSR" "time_ms" "naive_GF/s" "L1D_miss" "L2_miss" "LLC_miss"
+    printf '%s\n' "$(printf '=%.0s' {1..100})"
 } > "$OUT"
 
 for cfg_line in "${CONFIGS[@]}"; do
@@ -94,32 +77,26 @@ for cfg_line in "${CONFIGS[@]}"; do
     actual=$(get_hwpf)
     echo "    MSR readback: $actual"
 
-    for bin_label in "sw_off:$BIN_DIR/matmul_nopf" "sw_on:$BIN_DIR/matmul_pf"; do
-        sw_name="${bin_label%%:*}"
-        bin_path="${bin_label##*:}"
+    for sz in "${SIZES[@]}"; do
+        echo "  $cfg_name / size=$sz"
 
-        for sz in "${SIZES[@]}"; do
-            echo "  $cfg_name / $sw_name / size=$sz"
+        # Run naive only — use "prefetch" stage with mode=0 (identical to naive)
+        # but we only care about the naive (ref) line
+        perf_out=$(taskset -c $CORE perf stat -e "$PERF_EVENTS" \
+            "$BIN_DIR/matmul_nopf" prefetch "$sz" "$sz" "$sz" 2>&1)
 
-            perf_out=$(taskset -c $CORE perf stat -e "$PERF_EVENTS" \
-                "$bin_path" prefetch "$sz" "$sz" "$sz" 2>&1)
+        # naive (ref): $1=naive $2=(ref) $3=yes $4=time(ms) $5=GF/s
+        naive_time=$(echo "$perf_out" | grep -E '^\s*naive' | awk '{print $4}')
+        naive_gf=$(echo "$perf_out" | grep -E '^\s*naive' | awk '{print $5}')
 
-            # naive (ref) has extra "(ref)" token: $1=naive $2=(ref) $3=yes $4=time $5=GF/s
-            naive_gf=$(echo "$perf_out" | grep -E '^\s*naive' | awk '{print $5}')
-            # prefetch: $1=prefetch $2=yes $3=time $4=GF/s $5=speedup
-            kern_gf=$(echo "$perf_out" | grep -E '^\s*prefetch\s' | awk '{print $4}')
-            kern_spd=$(echo "$perf_out" | grep -E '^\s*prefetch\s' | awk '{print $5}')
+        # Parse perf counters — cpu_core only (hybrid CPU)
+        l1d=$(echo "$perf_out" | grep 'cpu_core/L1-dcache-load-misses/' | awk '{gsub(/,/,"",$1); print $1}')
+        l2=$(echo "$perf_out" | grep 'cpu_core/l2_rqsts.miss/' | awk '{gsub(/,/,"",$1); print $1}')
+        llc=$(echo "$perf_out" | grep 'cpu_core/LLC-load-misses/' | awk '{gsub(/,/,"",$1); print $1}')
 
-            # Parse perf counters — cpu_core only (hybrid CPU)
-            l1d=$(echo "$perf_out" | grep 'cpu_core/L1-dcache-load-misses/' | awk '{gsub(/,/,"",$1); print $1}')
-            l2=$(echo "$perf_out" | grep 'cpu_core/l2_rqsts.miss/' | awk '{gsub(/,/,"",$1); print $1}')
-            llc=$(echo "$perf_out" | grep 'cpu_core/LLC-load-misses/' | awk '{gsub(/,/,"",$1); print $1}')
-
-            printf "%-18s  %-12s  %6s  %5s  %10s  %10s  %8s  %14s  %14s  %14s\n" \
-                "$cfg_name" "$sw_name" "$sz" "$cfg_msr" \
-                "${naive_gf:---}" "${kern_gf:---}" "${kern_spd:---}" \
-                "${l1d:---}" "${l2:---}" "${llc:---}" >> "$OUT"
-        done
+        printf "%-10s  %6s  %5s  %10s  %10s  %14s  %14s  %14s\n" \
+            "$cfg_name" "$sz" "$cfg_msr" \
+            "${naive_time:---}" "${naive_gf:---}" "${l1d:---}" "${l2:---}" "${llc:---}" >> "$OUT"
     done
 done
 
