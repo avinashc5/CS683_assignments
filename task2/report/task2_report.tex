@@ -281,7 +281,7 @@ Metrics & & 128 & 256 & 512 & 1024 & 2048 \\
 }
 \end{table}
 
-\textbf{Instruction count observation:} SIMD does \emph{not} significantly reduce instruction count: the SIMD versions issue roughly the same number of instructions as the naive version (within ${\sim}7\%$).
+\textbf{Instruction count observation:} SIMD does \emph{not} significantly reduce instruction count: the SIMD versions issue roughly the same number of instructions as the naive version (within ${\sim}9\%$).
 This is because the register-tiled micro-kernel still executes $O(MNK)$ FMA instructions; SIMD packs 4/8/16 multiply-adds into each instruction but also adds overhead from broadcasts, horizontal reductions, and cleanup.
 The speedup comes not from fewer instructions but from each instruction doing $4{\times}$/$8{\times}$/$16{\times}$ more work.
 
@@ -554,7 +554,7 @@ The three techniques target fundamentally different bottlenecks:
 
     \item \textbf{Prefetch (scalar)} provides negligible benefit: the best configuration achieves ${\sim}1.03$--$1.06{\times}$ speedup at all sizes. The scalar kernel is compute-bound, not memory-bound.
 
-    \item \textbf{SIMD + Blocking} pays a fixed overhead for B-panel packing, which hurts at small sizes (\optSweepOhtwentyeightGflops{} GFLOP/s at $128$ vs.\ \simdWidthAVXOhtwentyeightGflops{} for SIMD-only). The crossover occurs around $512$, where the packing cost is amortized and the MC${\times}$NC blocking keeps the packed panel resident in L2. From $512$ onward, the combined kernel dominates: \optSweepFtwelveGflops{} GFLOP/s at $512$, \optSweepTtwentyfourGflops{} at $1024$, and \optSweepTfortyeightGflops{} at $2048$, while SIMD-only drops to \simdWidthAVXTfortyeightGflops{} at $2048$.
+    \item \textbf{SIMD + Blocking} pays a fixed overhead for B-panel packing, so at small sizes it is merely competitive with SIMD-only (\optSweepOhtwentyeightGflops{} vs.\ \simdWidthAVXOhtwentyeightGflops{} GFLOP/s at $128$; \optSweepTwofiftysixGflops{} vs.\ \simdWidthAVXTwofiftysixGflops{} at $256$) rather than clearly ahead. From $512$ onward the packing cost is amortized, the MC${\times}$NC blocking keeps the packed panel resident in L2, and the combined kernel pulls decisively ahead: \optSweepFtwelveGflops{} GFLOP/s at $512$, \optSweepTtwentyfourGflops{} at $1024$, and \optSweepTfortyeightGflops{} at $2048$, while SIMD-only drops to \simdWidthAVXTfortyeightGflops{} at $2048$.
 
     \item The synergy is \emph{complementary}: SIMD removes the compute bottleneck (fewer instructions per FLOP); blocking removes the memory bottleneck (data stays in L2). Neither alone achieves both. The combined kernel sustains $>$100 GFLOP/s from $512$ through $2048$, while SIMD-only loses half its throughput at $2048$ and prefetch-only never exceeds the naive baseline by more than ${\sim}6\%$.
 \end{itemize}
