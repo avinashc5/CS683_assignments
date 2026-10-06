@@ -7,13 +7,13 @@
 //   3 = reordered   (ky,kx,oy,ox) + square tiling  (TILE_H x TILE_W)
 
 #ifndef TILE_H
-#define TILE_H 32
+#define TILE_H 8
 #endif
 #ifndef TILE_W
 #define TILE_W 32
 #endif
 #ifndef TILE_MODE
-#define TILE_MODE 1
+#define TILE_MODE 3
 #endif
 
 #include "convolution.h"
