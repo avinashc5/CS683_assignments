@@ -47,11 +47,11 @@ void CACHE::l2c_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t wa
     else if (type == WRITEBACK)
         TYPE_NAME = "WB";
     else if (type == LOAD_TRANSLATION)
-	TYPE_NAME = "L_TN";
+	    TYPE_NAME = "L_TN";
     else if (type == PREFETCH_TRANSLATION)
-	TYPE_NAME = "P_TN";
+	    TYPE_NAME = "P_TN";
     else if (type == TRANSLATION_FROM_L1D)
-	TYPE_NAME = "TN_L1D";
+	    TYPE_NAME = "TN_L1D";
     else
         assert(0);
 
@@ -66,7 +66,7 @@ void CACHE::l2c_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t wa
     // uncomment this line to see the L2C accesses
     // cout << "CPU: " << cpu << "  L2C " << setw(9) << TYPE_NAME << " set: " << setw(5) << set << " way: " << setw(2) << way;
     // cout << hex << " paddr: " << setw(12) << paddr << " ip: " << setw(8) << ip << " victim_addr: " << victim_addr << dec << endl;
-    
+
     if (hit)
         l2_rrpv[set][way] = 0;
     else

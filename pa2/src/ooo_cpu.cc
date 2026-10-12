@@ -8,7 +8,7 @@
 #include <algorithm>
 
 // out-of-order core
-O3_CPU ooo_cpu[NUM_CPUS]; 
+O3_CPU ooo_cpu[NUM_CPUS];
 uint64_t current_core_cycle[NUM_CPUS], stall_cycle[NUM_CPUS];
 uint32_t SCHEDULING_LATENCY = 0, EXEC_LATENCY = 0, DECODE_LATENCY = 0;
 uint8_t TRACE_ENDS_STOP = 0;
@@ -35,7 +35,7 @@ void O3_CPU::initialize_core()
 #ifdef PERFECT_L2C
 	cout << "Running PERFECT_L2C. " << endl;
 #ifdef PRACTICAL_PERFECT_L2C
-	cout << "Running both PERFECT_L2C and PRACTICAL_PERFECT_L2C. Can run only one of these." << endl; 
+	cout << "Running both PERFECT_L2C and PRACTICAL_PERFECT_L2C. Can run only one of these." << endl;
 	assert(0);
 #endif
 #endif
@@ -52,22 +52,22 @@ void O3_CPU::read_from_trace()
 {
     // actual processors do not work like this but for easier implementation,
     // we read instruction traces and virtually add them in the ROB
-    // note that these traces are not yet translated and fetched 
+    // note that these traces are not yet translated and fetched
 
     uint8_t continue_reading = 1;
     uint32_t num_reads = 0;
     instrs_to_read_this_cycle = FETCH_WIDTH;
-	
+
     // first, read PIN trace
     while (continue_reading) {
 
         size_t instr_size = knob_cloudsuite ? sizeof(cloudsuite_instr) : sizeof(input_instr);
-	
+
         if (knob_cloudsuite) {
-        
+
             if (!fread(&current_cloudsuite_instr, instr_size, 1, trace_file)) {
                 // reached end of file for this trace
-                //cout << "*** Reached end of trace for Core: " << cpu << " Repeating trace: " << trace_string << endl; 
+                //cout << "*** Reached end of trace for Core: " << cpu << " Repeating trace: " << trace_string << endl;
 		//TRACE_ENDS_STOP = 1; /*@Vasudha - STOP simulation once trace file ends*/
                 // close the trace file and re-open it
                 pclose(trace_file);
@@ -106,7 +106,7 @@ void O3_CPU::read_from_trace()
 		if(flag==0)
 		{
 			UNIQUE_ASID[asid_index] = arch_instr.asid[0];
-			cout <<"UNIQUE_ASID[" << asid_index << "] = " << UNIQUE_ASID[asid_index] << endl; 
+			cout <<"UNIQUE_ASID[" << asid_index << "] = " << UNIQUE_ASID[asid_index] << endl;
 			asid_index++;
 		}
                 for (uint32_t i=0; i<MAX_INSTR_DESTINATIONS; i++) {
@@ -149,7 +149,7 @@ void O3_CPU::read_from_trace()
 
                 arch_instr.num_reg_ops = num_reg_ops;
                 arch_instr.num_mem_ops = num_mem_ops;
-                if (num_mem_ops > 0) 
+                if (num_mem_ops > 0)
                     arch_instr.is_memory = 1;
 
 //Neelu: Addition begin
@@ -164,8 +164,8 @@ void O3_CPU::read_from_trace()
 				DP( if (warmup_complete[cpu]) {
 						cout << "[BRANCH] instr_id: " << instr_unique_id << " ip: " << hex << arch_instr.ip << dec << " taken: " << +arch_instr.branch_taken << endl; });
 
-			
-				num_branch++;	
+
+				num_branch++;
 				// handle branch prediction & branch predictor update
 
 				uint8_t branch_prediction = predict_branch(IFETCH_BUFFER.entry[ifetch_buffer_index].ip);
@@ -194,7 +194,7 @@ void O3_CPU::read_from_trace()
 			}
 
 
-				
+
 //Neelu: Addition end
 
 
@@ -213,13 +213,13 @@ void O3_CPU::read_from_trace()
 		if(ooo_cpu[cpu].context_switch)
 		{
 			//cout << "context_switch = " << cpu <<" cycle="<<current_core_cycle[cpu]<<"ROB-occupancy = "<< ROB.occupancy <<  endl;
-	               
+
 			break;
-		} 
+		}
 		input_instr trace_read_instr;
             if (!fread(&trace_read_instr, instr_size, 1, trace_file)) {
                 // reached end of file for this trace
-                cout << "*** Reached end of trace for Core: " << cpu << " Repeating trace: " << trace_string << endl; 
+                cout << "*** Reached end of trace for Core: " << cpu << " Repeating trace: " << trace_string << endl;
 
                 // close the trace file and re-open it
                 pclose(trace_file);
@@ -318,7 +318,7 @@ void O3_CPU::read_from_trace()
 
                 arch_instr.num_reg_ops = num_reg_ops;
                 arch_instr.num_mem_ops = num_mem_ops;
-                if (num_mem_ops > 0) 
+                if (num_mem_ops > 0)
                     arch_instr.is_memory = 1;
 
 
@@ -326,14 +326,14 @@ void O3_CPU::read_from_trace()
 		if(!reads_sp && !reads_flags && writes_ip && !reads_other)
 		{
 			// direct jump
-			arch_instr.is_branch = 1; 
+			arch_instr.is_branch = 1;
 			arch_instr.branch_taken = 1;
 			arch_instr.branch_type = BRANCH_DIRECT_JUMP;
 		}
 		else if(!reads_sp && !reads_flags && writes_ip && reads_other)
 		{
 			// indirect branch
-			arch_instr.is_branch = 1; 
+			arch_instr.is_branch = 1;
 			arch_instr.branch_taken = 1;
 			arch_instr.branch_type = BRANCH_INDIRECT;
 		}
@@ -388,7 +388,7 @@ void O3_CPU::read_from_trace()
 		if (IFETCH_BUFFER.occupancy < IFETCH_BUFFER.SIZE) {
 			uint32_t ifetch_buffer_index = add_to_ifetch_buffer(&arch_instr);
 			num_reads++;
-	
+
 	 		// handle branch prediction
 
 			if (IFETCH_BUFFER.entry[ifetch_buffer_index].is_branch) {
@@ -429,7 +429,7 @@ void O3_CPU::read_from_trace()
 						{
 								BTB.sim_hit[cpu][ arch_instr. branch_type - 1]++;
 								BTB.sim_access[cpu][ arch_instr.branch_type - 1]++;
-								(BTB.*BTB.update_replacement_state)(cpu, btb_set, btb_way, arch_instr.ip, arch_instr.ip, 0, 0, 1);
+								(BTB.*BTB.update_replacement_state)(cpu, btb_set, btb_way, arch_instr.ip, arch_instr.ip, 0, 0, 1, 0);
 						}
 						else
 						{
@@ -453,7 +453,7 @@ void O3_CPU::read_from_trace()
 				{
 					BTB.sim_hit[cpu][ arch_instr. branch_type - 1]++;
                     BTB.sim_access[cpu][ arch_instr.branch_type - 1]++;
-                    (BTB.*BTB.update_replacement_state)(cpu, btb_set, btb_way, arch_instr.ip, arch_instr.ip, 0, 0, 1);
+                    (BTB.*BTB.update_replacement_state)(cpu, btb_set, btb_way, arch_instr.ip, arch_instr.ip, 0, 0, 1, 0);
 				}
 			}
 
@@ -495,8 +495,8 @@ void O3_CPU::read_from_trace()
              /*   if (ROB.occupancy < ROB.SIZE) {
                     uint32_t rob_index = add_to_rob(&arch_instr);
                     num_reads++;
-		   // //cout << "cycle="<<current_core_cycle[cpu] << " cpu="<<cpu<<" addto rob -" <<ROB.occupancy << " "; 
-		    
+		   // //cout << "cycle="<<current_core_cycle[cpu] << " cpu="<<cpu<<" addto rob -" <<ROB.occupancy << " ";
+
                     // branch prediction
                     if (arch_instr.is_branch) {
 
@@ -510,12 +510,12 @@ void O3_CPU::read_from_trace()
                         // for faster simulation, force perfect prediction during the warmup
                         // note that branch predictor is still learning with real branch results
                         if (all_warmup_complete == 0)
-                            branch_prediction = arch_instr.branch_taken; 
+                            branch_prediction = arch_instr.branch_taken;
                         else
                             branch_prediction = predict_branch(arch_instr.ip);
                         //Neelu: Removed comment ending
                         uint8_t branch_prediction = predict_branch(arch_instr.ip);
-                        
+
                         if (arch_instr.branch_taken != branch_prediction) {
 			    //if(false) { // this simulates perfect branch prediction
 			    branch_mispredictions++;
@@ -530,7 +530,7 @@ void O3_CPU::read_from_trace()
                             instrs_to_read_this_cycle = 0;
 
                             // and stall any additional fetches until the branch is executed
-                            fetch_stall = 1; 
+                            fetch_stall = 1;
 
                             ROB.entry[rob_index].branch_mispredicted = 1;
                         }
@@ -563,7 +563,7 @@ void O3_CPU::read_from_trace()
 
 uint32_t O3_CPU::add_to_rob(ooo_model_instr *arch_instr)
 {
-	
+
     uint32_t index = ROB.tail;
 
     // sanity check
@@ -612,7 +612,7 @@ uint32_t O3_CPU::add_to_ifetch_buffer(ooo_model_instr *arch_instr)
 	  IFETCH_BUFFER.entry[index] = *arch_instr;
 	  IFETCH_BUFFER.entry[index].event_cycle = current_core_cycle[cpu];
 
-	//Neelu: Instead of translating instructions magically, translating them as usual to pay ITLB access penalty. 
+	//Neelu: Instead of translating instructions magically, translating them as usual to pay ITLB access penalty.
 	IFETCH_BUFFER.entry[index].instruction_pa = 0;
         IFETCH_BUFFER.entry[index].translated = 0;
 	IFETCH_BUFFER.entry[index].fetched = 0;
@@ -687,7 +687,7 @@ uint32_t O3_CPU::check_rob(uint64_t instr_id)
             }
         }
     }
-    
+
     cerr << "[ROB_ERROR] " << __func__ << " does not have any matching index! " << " head="<<ROB.head<<" tail="<<ROB.tail<<endl;
     cerr << " instr_id: " << instr_id << endl;
     assert(0);
@@ -699,7 +699,7 @@ void O3_CPU::fetch_instruction()
 {
     // TODO: can we model wrong path execusion?
 
-	
+
   // if we had a branch mispredict, turn fetching back on after the branch mispredict penalty
   ////////cout <<"prev, fetch_stall="<<fetch_stall<<" "<<current_core_cycle[cpu]<<" "<<fetch_resume_cycle<<endl;
   if((fetch_stall == 1) && (current_core_cycle[cpu] >= fetch_resume_cycle) && (fetch_resume_cycle != 0))
@@ -716,7 +716,7 @@ void O3_CPU::fetch_instruction()
 		return;
 	}
 
-	//Neelu: From IFETCH buffer, requests will be sent to L1-I and it will take care of sending the translation request to ITLB as L1 caches are VIPT in this version. 
+	//Neelu: From IFETCH buffer, requests will be sent to L1-I and it will take care of sending the translation request to ITLB as L1 caches are VIPT in this version.
 
 	uint32_t index = IFETCH_BUFFER.head;
 	for(uint32_t i=0; i<IFETCH_BUFFER.SIZE; i++)
@@ -739,7 +739,7 @@ void O3_CPU::fetch_instruction()
 			fetch_packet.full_addr = IFETCH_BUFFER.entry[index].ip;
 			fetch_packet.full_virtual_address = IFETCH_BUFFER.entry[index].ip;
 			fetch_packet.instr_id = 0;
-			//Neelu: Is assigning rob_index = 0 going to cause any problems? 
+			//Neelu: Is assigning rob_index = 0 going to cause any problems?
 			fetch_packet.rob_index = 0;
 			fetch_packet.producer = 0;
 			fetch_packet.ip = IFETCH_BUFFER.entry[index].ip;
@@ -775,10 +775,10 @@ void O3_CPU::fetch_instruction()
 		{
 			break;
 		}
-	}	//Neelu: For loop ending. 
+	}	//Neelu: For loop ending.
 
 	//send to decode stage
-	
+
 	bool decode_full = false;
 	for(uint32_t i=0; i<DECODE_WIDTH; i++)
 	{
@@ -828,7 +828,7 @@ void O3_CPU::fetch_instruction()
     // add this request to ITLB
     // @Vishal: Transalation will be handled by L1D cache (VIPT)
 
-	//Neelu: Comment started from here. 
+	//Neelu: Comment started from here.
     /*uint32_t read_index = (ROB.last_read == (ROB.SIZE-1)) ? 0 : (ROB.last_read + 1);
     for (uint32_t i=0; i<FETCH_WIDTH; i++) {
 
@@ -862,7 +862,7 @@ void O3_CPU::fetch_instruction()
         trace_packet.rob_index = read_index;
         trace_packet.producer = 0; // TODO: check if this guy gets used or not
         trace_packet.ip = ROB.entry[read_index].ip;
-        trace_packet.type = LOAD; 
+        trace_packet.type = LOAD;
         trace_packet.asid[0] = ROB.entry[read_index].asid[0];
         trace_packet.asid[1] = ROB.entry[read_index].asid[1];
         trace_packet.event_cycle = current_core_cycle[cpu];
@@ -872,16 +872,16 @@ void O3_CPU::fetch_instruction()
         if (rq_index == -2)
             break;
         else {
-            
+
             //if (rq_index >= 0) {
             //    uint32_t producer = ITLB.RQ.entry[rq_index].rob_index;
             //    ROB.entry[read_index].fetch_producer = producer;
             //    ROB.entry[read_index].is_consumer = 1;
-	    //	
+	    //
             //    ROB.entry[producer].memory_instrs_depend_on_me[read_index] = 1;
             //    ROB.entry[producer].is_producer = 1; // producer for fetch
             //}
-            
+
 
             ROB.last_read = read_index;
             read_index++;
@@ -900,9 +900,9 @@ void O3_CPU::fetch_instruction()
 	// @Vishal: TODO see if we can make out of order fetch as schedule_instruction is in order.
         // @Vishal: Removed transalation condition
 	//if ((ROB.entry[fetch_index].translated != COMPLETED) || (ROB.entry[fetch_index].event_cycle > current_core_cycle[cpu]))
-	 if(ROB.entry[fetch_index].event_cycle > current_core_cycle[cpu]) 
+	 if(ROB.entry[fetch_index].event_cycle > current_core_cycle[cpu])
             break;
-	
+
         //@Vishal: check if empty ROB slot
 	if(ROB.entry[fetch_index].ip == 0)
 		break;
@@ -922,21 +922,21 @@ void O3_CPU::fetch_instruction()
         fetch_packet.instruction = 1;
         fetch_packet.fill_level = FILL_L1;
         fetch_packet.cpu = cpu;
-	
+
 	//@Vishal: VIPT virtual address will be sent to L1I instead of physical address
         /*fetch_packet.address = ROB.entry[fetch_index].instruction_pa >> 6;
         fetch_packet.instruction_pa = ROB.entry[fetch_index].instruction_pa;
         fetch_packet.full_addr = ROB.entry[fetch_index].instruction_pa; //Neelu: Removed comment ending.
 
 	fetch_packet.address = ROB.entry[fetch_index].ip >> 6;
-        fetch_packet.full_addr = ROB.entry[fetch_index].ip;	
+        fetch_packet.full_addr = ROB.entry[fetch_index].ip;
 	fetch_packet.full_virtual_address =  ROB.entry[fetch_index].ip;
 
         fetch_packet.instr_id = ROB.entry[fetch_index].instr_id;
         fetch_packet.rob_index = fetch_index;
         fetch_packet.producer = 0;
         fetch_packet.ip = ROB.entry[fetch_index].ip;
-        fetch_packet.type = LOAD; 
+        fetch_packet.type = LOAD;
         fetch_packet.asid[0] = ROB.entry[fetch_index].asid[0];
         fetch_packet.asid[1] = ROB.entry[fetch_index].asid[1];
         fetch_packet.event_cycle = current_core_cycle[cpu];
@@ -964,8 +964,8 @@ void O3_CPU::fetch_instruction()
                 fetch_index = 0;
         }
     }*/
-	//Neelu: Commented until here. 
-	
+	//Neelu: Commented until here.
+
     //DP ( if (warmup_complete[cpu]) {
       //          //cout << "Exit fetch_instruction() with read instr id:"<< ROB.entry[read_index].instr_id << "fetch instr_id:"<< ROB.entry[fetch_index].instr_id<< endl; });
 
@@ -976,11 +976,11 @@ void O3_CPU::fill_btb(uint64_t trigger, uint64_t target)
 {
 	uint32_t btb_set = BTB.get_set(trigger >> 2);
 	int btb_way = BTB.get_way(trigger, btb_set);
-	
+
 	if(btb_way == BTB_WAY)
 	{
 		btb_way = (BTB.*BTB.find_victim)(cpu, 0, btb_set, BTB.block[btb_set], trigger, trigger, 0);
-		(BTB.*BTB.update_replacement_state)(cpu, btb_set, btb_way, trigger, trigger, BTB.block[btb_set][btb_way].address, 0, 0);
+		(BTB.*BTB.update_replacement_state)(cpu, btb_set, btb_way, trigger, trigger, BTB.block[btb_set][btb_way].address, 0, 0, 0);
 		BLOCK &entry = BTB.block[btb_set][btb_way];
 		if(entry.valid == 0)
 			entry.valid = 1;
@@ -995,7 +995,7 @@ void O3_CPU::fill_btb(uint64_t trigger, uint64_t target)
 	else
 	{
 		BTB.block[btb_set][btb_way].data = target;
-	}			
+	}
 }
 
 
@@ -1005,8 +1005,8 @@ void O3_CPU::decode_and_dispatch()
 	  // dispatch DECODE_WIDTH instructions that have decoded into the ROB
 	  uint32_t count_dispatches = 0;
 	  //cout << "Called decode_and_dispatch: " << current_core_cycle[cpu] << endl;
-	  
-	  
+
+
 	  for(uint32_t i=0; i<DECODE_BUFFER.SIZE; i++)
 	  {
 		  if(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip == 0)
@@ -1027,8 +1027,8 @@ void O3_CPU::decode_and_dispatch()
 				}
 				DECODE_BUFFER.entry[DECODE_BUFFER.head].btb_miss = 0;
 				//if(branch_type == BRANCH_CONDITIONAL)
-				//assert(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip + 4 != DECODE_BUFFER.entry[DECODE_BUFFER.head].branch_target);		
-				fill_btb(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip, DECODE_BUFFER.entry[DECODE_BUFFER.head].branch_target);		
+				//assert(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip + 4 != DECODE_BUFFER.entry[DECODE_BUFFER.head].branch_target);
+				fill_btb(DECODE_BUFFER.entry[DECODE_BUFFER.head].ip, DECODE_BUFFER.entry[DECODE_BUFFER.head].branch_target);
 			}
 		}
 
@@ -1106,7 +1106,7 @@ int O3_CPU::prefetch_code_line(uint64_t pf_v_addr)
 
 	  if (L1I.PQ.occupancy < L1I.PQ.SIZE)
 	  {
-		  //Neelu: Cannot magically translate prefetches, need to get realistic and access the TLBs. 
+		  //Neelu: Cannot magically translate prefetches, need to get realistic and access the TLBs.
 		  // magically translate prefetches
 		/*  uint64_t pf_pa = (va_to_pa(cpu, 0, pf_v_addr, pf_v_addr>>LOG2_PAGE_SIZE, 1) & (~((1 << LOG2_PAGE_SIZE) - 1))) | (pf_v_addr & ((1 << LOG2_PAGE_SIZE) - 1)); */
 
@@ -1116,8 +1116,8 @@ int O3_CPU::prefetch_code_line(uint64_t pf_v_addr)
 		  pf_packet.fill_level = FILL_L1;
 		  pf_packet.fill_l1i = 1;
 		  pf_packet.pf_origin_level = FILL_L1;
-		  pf_packet.cpu = cpu;		 
-		  //Neelu: assigning virtual addresses.  
+		  pf_packet.cpu = cpu;
+		  //Neelu: assigning virtual addresses.
 		  //pf_packet.address = pf_pa >> LOG2_BLOCK_SIZE;
 		  //pf_packet.full_addr = pf_pa;
 
@@ -1134,7 +1134,7 @@ int O3_CPU::prefetch_code_line(uint64_t pf_v_addr)
 
 		  L1I.add_pq(&pf_packet);
 		  L1I.pf_issued++;
-		
+
 		  return 1;
 	  }
 
@@ -1158,7 +1158,7 @@ void O3_CPU::schedule_instruction()
       //          //cout << "Entered schedule_instruction() with instr id:"<< ROB.entry[limit].instr_id << endl; });
     num_searched = 0;
     if (ROB.head < limit) {
-        for (uint32_t i=ROB.head; i<limit; i++) { 
+        for (uint32_t i=ROB.head; i<limit; i++) {
             if ((ROB.entry[i].fetched != COMPLETED) || (ROB.entry[i].event_cycle > current_core_cycle[cpu]) || (num_searched >= SCHEDULER_SIZE))
                 return;
 
@@ -1178,7 +1178,7 @@ void O3_CPU::schedule_instruction()
 
             num_searched++;
         }
-        for (uint32_t i=0; i<limit; i++) { 
+        for (uint32_t i=0; i<limit; i++) {
             if ((ROB.entry[i].fetched != COMPLETED) || (ROB.entry[i].event_cycle > current_core_cycle[cpu]) || (num_searched >= SCHEDULER_SIZE))
                 return;
 
@@ -1194,7 +1194,7 @@ void O3_CPU::schedule_instruction()
 
 void O3_CPU::do_scheduling(uint32_t rob_index)
 {
-    ROB.entry[rob_index].reg_ready = 1; // reg_ready will be reset to 0 if there is RAW dependency 
+    ROB.entry[rob_index].reg_ready = 1; // reg_ready will be reset to 0 if there is RAW dependency
 
     reg_dependency(rob_index);
     ROB.next_schedule = (rob_index == (ROB.SIZE - 1)) ? 0 : (rob_index + 1);
@@ -1221,7 +1221,7 @@ void O3_CPU::do_scheduling(uint32_t rob_index)
 
             //DP (if (warmup_complete[cpu]) {
             //cout << "[RTE1] " << __func__ << " instr_id: " << ROB.entry[rob_index].instr_id << " rob_index: " << rob_index << " is added to RTE1";
-            //cout << " head: " << RTE1_head << " tail: " << RTE1_tail << endl; }); 
+            //cout << " head: " << RTE1_head << " tail: " << RTE1_tail << endl; });
 
             RTE1_tail++;
             if (RTE1_tail == ROB_SIZE)
@@ -1291,7 +1291,7 @@ void O3_CPU::reg_RAW_dependency(uint32_t prior, uint32_t current, uint32_t sourc
             ROB.entry[prior].reg_RAW_producer = 1;
 
             ROB.entry[current].reg_ready = 0;
-            ROB.entry[current].producer_id = ROB.entry[prior].instr_id; 
+            ROB.entry[current].producer_id = ROB.entry[prior].instr_id;
             ROB.entry[current].num_reg_dependent++;
             ROB.entry[current].reg_RAW_checked[source_index] = 1;
 
@@ -1385,7 +1385,7 @@ void O3_CPU::do_execution(uint32_t rob_index)
         inflight_reg_executions++;
 
         //DP (if (warmup_complete[cpu]) {
-        //cout << "[ROB] " << __func__ << " non-memory instr_id: " << ROB.entry[rob_index].instr_id; 
+        //cout << "[ROB] " << __func__ << " non-memory instr_id: " << ROB.entry[rob_index].instr_id;
         //cout << " event_cycle: " << ROB.entry[rob_index].event_cycle << endl;});
     //}
 }
@@ -1467,7 +1467,7 @@ void O3_CPU::do_memory_scheduling(uint32_t rob_index)
     num_searched++;
 }
 
-uint32_t O3_CPU::check_and_add_lsq(uint32_t rob_index) 
+uint32_t O3_CPU::check_and_add_lsq(uint32_t rob_index)
 {
     uint32_t num_mem_ops = 0, num_added = 0;
 
@@ -1525,7 +1525,7 @@ uint32_t O3_CPU::check_and_add_lsq(uint32_t rob_index)
 
 void O3_CPU::add_load_queue(uint32_t rob_index, uint32_t data_index)
 {
-    // search for an empty slot 
+    // search for an empty slot
     uint32_t lq_index = LQ.SIZE;
     for (uint32_t i=0; i<LQ.SIZE; i++) {
         if (LQ.entry[i].virtual_address == 0) {
@@ -1585,7 +1585,7 @@ void O3_CPU::add_load_queue(uint32_t rob_index, uint32_t data_index)
 
                     mem_RAW_dependency(i, rob_index, data_index, lq_index);
             }
-            for (int i=ROB.SIZE-1; i>=(int)ROB.head; i--) { 
+            for (int i=ROB.SIZE-1; i>=(int)ROB.head; i--) {
                 if (LQ.entry[lq_index].producer_id != UINT64_MAX)
                     break;
 
@@ -1613,8 +1613,8 @@ void O3_CPU::add_load_queue(uint32_t rob_index, uint32_t data_index)
                 break; // should be break
             }
 
-            if ((LQ.entry[lq_index].producer_id == UINT64_MAX) && (LQ.entry[lq_index].instr_id <= SQ.entry[i].instr_id)) { // WAR 
-                // a load is about to be added in the load queue and we found a store that is 
+            if ((LQ.entry[lq_index].producer_id == UINT64_MAX) && (LQ.entry[lq_index].instr_id <= SQ.entry[i].instr_id)) { // WAR
+                // a load is about to be added in the load queue and we found a store that is
                 // "logically later in the program order but already executed" => this is not correctly executed WAR
                 // due to out-of-order execution, this case is possible, for example
                 // 1) application is load intensive and load queue is full
@@ -1622,7 +1622,7 @@ void O3_CPU::add_load_queue(uint32_t rob_index, uint32_t data_index)
                 // 3) subsequent stores logically behind in the program order are added in the store queue first
 
                 // thanks to the store buffer, data is not written back to the memory system until retirement
-                // also due to in-order retirement, this "already executed store" cannot be retired until we finish the prior load instruction 
+                // also due to in-order retirement, this "already executed store" cannot be retired until we finish the prior load instruction
                 // if we detect WAR when a load is added in the load queue, just let the load instruction to access the memory system
                 // no need to mark any dependency because this is actually WAR not RAW
 
@@ -1632,7 +1632,7 @@ void O3_CPU::add_load_queue(uint32_t rob_index, uint32_t data_index)
                 LQ.entry[lq_index].physical_address = 0;
                 LQ.entry[lq_index].translated = 0;
                 LQ.entry[lq_index].fetched = 0;
-                
+
                 DP(if(warmup_complete[cpu]) {
                 cout << "[LQ] " << __func__ << " instr_id: " << LQ.entry[lq_index].instr_id << " reset fetched: " << +LQ.entry[lq_index].fetched;
                 cout << " to obey WAR store instr_id: " << SQ.entry[i].instr_id << " cycle: " << current_core_cycle[cpu] << endl; });
@@ -1643,7 +1643,7 @@ void O3_CPU::add_load_queue(uint32_t rob_index, uint32_t data_index)
     if (forwarding_index != SQ.SIZE) { // we have a store-to-load forwarding
 
         if ((SQ.entry[forwarding_index].fetched == COMPLETED) && (SQ.entry[forwarding_index].event_cycle <= current_core_cycle[cpu])) {
-           
+
 	    //@Vishal: count RAW forwarding
 	    sim_RAW_hits++;
 
@@ -1684,7 +1684,7 @@ void O3_CPU::add_load_queue(uint32_t rob_index, uint32_t data_index)
 
         //DP (if (warmup_complete[cpu]) {
         //cout << "[RTL0] " << __func__ << " instr_id: " << LQ.entry[lq_index].instr_id << " rob_index: " << LQ.entry[lq_index].rob_index << " is added to RTL0";
-        //cout << " head: " << RTL0_head << " tail: " << RTL0_tail << endl; }); 
+        //cout << " head: " << RTL0_head << " tail: " << RTL0_tail << endl; });
     }
 
     //DP(if(warmup_complete[cpu]) {
@@ -1704,7 +1704,7 @@ void O3_CPU::mem_RAW_dependency(uint32_t prior, uint32_t current, uint32_t data_
             // we need to mark this dependency in the ROB since the producer might not be added in the store queue yet
             ROB.entry[prior].memory_instrs_depend_on_me.insert (current);   // this load cannot be executed until the prior store gets executed
             ROB.entry[prior].is_producer = 1;
-            LQ.entry[lq_index].producer_id = ROB.entry[prior].instr_id; 
+            LQ.entry[lq_index].producer_id = ROB.entry[prior].instr_id;
             LQ.entry[lq_index].translated = INFLIGHT;
 
             //DP (if(warmup_complete[cpu]) {
@@ -1725,7 +1725,7 @@ void O3_CPU::add_store_queue(uint32_t rob_index, uint32_t data_index)
 #endif
 
     /*
-    // search for an empty slot 
+    // search for an empty slot
     uint32_t sq_index = SQ.SIZE;
     for (uint32_t i=0; i<SQ.SIZE; i++) {
         if (SQ.entry[i].virtual_address == 0) {
@@ -1761,7 +1761,7 @@ void O3_CPU::add_store_queue(uint32_t rob_index, uint32_t data_index)
 
     // succesfully added to the store queue
     ROB.entry[rob_index].destination_added[data_index] = 1;
-    
+
     STA[STA_head] = UINT64_MAX;
     STA_head++;
     if (STA_head == STA_SIZE)
@@ -1838,13 +1838,13 @@ void O3_CPU::operate_lsq()
 
                 //DP (if (warmup_complete[cpu]) {
                 //cout << "[RTS0] " << __func__ << " instr_id: " << SQ.entry[sq_index].instr_id << " rob_index: " << SQ.entry[sq_index].rob_index << " is popped from to RTS0";
-                //cout << " head: " << RTS0_head << " tail: " << RTS0_tail << endl; }); 
+                //cout << " head: " << RTS0_head << " tail: " << RTS0_tail << endl; });
 
                 int rq_index = DTLB.add_rq(&data_packet);
 
                 if (rq_index == -2)
-                    break; 
-                else 
+                    break;
+                else
                     SQ.entry[sq_index].translated = INFLIGHT;
 
                 RTS0[RTS0_head] = SQ_SIZE;
@@ -1951,13 +1951,13 @@ void O3_CPU::operate_lsq()
 
                 //DP (if (warmup_complete[cpu]) {
                 //cout << "[RTL0] " << __func__ << " instr_id: " << LQ.entry[lq_index].instr_id << " rob_index: " << LQ.entry[lq_index].rob_index << " is popped to RTL0";
-                //cout << " head: " << RTL0_head << " tail: " << RTL0_tail << endl; }); 
+                //cout << " head: " << RTL0_head << " tail: " << RTL0_tail << endl; });
 
                 int rq_index = DTLB.add_rq(&data_packet);
 
                 if (rq_index == -2)
                     break; // break here
-                else  
+                else
                     LQ.entry[lq_index].translated = INFLIGHT;
 
                 RTL0[RTL0_head] = LQ_SIZE;
@@ -2012,7 +2012,7 @@ void O3_CPU::execute_store(uint32_t rob_index, uint32_t sq_index, uint32_t data_
 {
     SQ.entry[sq_index].fetched = COMPLETED;
     SQ.entry[sq_index].event_cycle = current_core_cycle[cpu];
-   
+
     ROB.entry[rob_index].num_mem_ops--;
     ROB.entry[rob_index].event_cycle = current_core_cycle[cpu];
     if (ROB.entry[rob_index].num_mem_ops < 0) {
@@ -2020,9 +2020,9 @@ void O3_CPU::execute_store(uint32_t rob_index, uint32_t sq_index, uint32_t data_
         assert(0);
     }
 
-    if (ROB.entry[rob_index].num_mem_ops == 0)	
+    if (ROB.entry[rob_index].num_mem_ops == 0)
     	inflight_mem_executions++;
-    
+
        //DP (if (warmup_complete[cpu]) {
     //cout << "[SQ1] " << __func__ << " instr_id: " << SQ.entry[sq_index].instr_id << hex;
     //cout << " full_address: " << SQ.entry[sq_index].physical_address << dec << " remain_mem_ops: " << ROB.entry[rob_index].num_mem_ops;
@@ -2036,7 +2036,7 @@ void O3_CPU::execute_store(uint32_t rob_index, uint32_t sq_index, uint32_t data_
             for (uint32_t j=0; j<NUM_INSTR_SOURCES; j++) { // which one is dependent?
                 if (ROB.entry[dependent].source_memory[j] && ROB.entry[dependent].source_added[j]) {
                     if (ROB.entry[dependent].source_memory[j] == SQ.entry[sq_index].virtual_address) { // this is required since a single instruction can issue multiple loads
-			
+
                          //@Vishal: count RAW forwarding
 			 sim_RAW_hits++;
 
@@ -2112,15 +2112,15 @@ int O3_CPU::execute_load(uint32_t rob_index, uint32_t lq_index, uint32_t data_in
     data_packet.asid[0] = LQ.entry[lq_index].asid[0];
     data_packet.asid[1] = LQ.entry[lq_index].asid[1];
     data_packet.event_cycle = LQ.entry[lq_index].event_cycle;
-    
+
     int rq_index = L1D.add_rq(&data_packet);
 
     if (rq_index == -2)
         return rq_index;
-    else 
+    else
     {
         LQ.entry[lq_index].fetched = INFLIGHT;
-	
+
 	sim_load_sent++;
     }
 
@@ -2134,7 +2134,7 @@ void O3_CPU::complete_execution(uint32_t rob_index)
     if (ROB.entry[rob_index].is_memory == 0) {
         if ((ROB.entry[rob_index].executed == INFLIGHT) && (ROB.entry[rob_index].event_cycle <= current_core_cycle[cpu])) {
 
-            ROB.entry[rob_index].executed = COMPLETED; 
+            ROB.entry[rob_index].executed = COMPLETED;
             inflight_reg_executions--;
             completed_executions++;
 
@@ -2158,7 +2158,7 @@ void O3_CPU::complete_execution(uint32_t rob_index)
             	uint8_t branch_type = ROB.entry[rob_index].branch_type;
             	assert(branch_type != BRANCH_DIRECT_JUMP && branch_type != BRANCH_DIRECT_CALL && branch_type != BRANCH_CONDITIONAL);
 				if(warmup_complete[cpu])
-				{ 
+				{
                 	fetch_resume_cycle = current_core_cycle[cpu] + 1; //Resume fetch from next cycle.
 				}
 				fill_btb(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target);
@@ -2177,7 +2177,7 @@ void O3_CPU::complete_execution(uint32_t rob_index)
                 ROB.entry[rob_index].executed = COMPLETED;
                 inflight_mem_executions--;
                 completed_executions++;
-                
+
                 if (ROB.entry[rob_index].reg_RAW_producer)
                     reg_RAW_release(rob_index);
 
@@ -2198,7 +2198,7 @@ void O3_CPU::complete_execution(uint32_t rob_index)
             	uint8_t branch_type = ROB.entry[rob_index].branch_type;
             	assert(branch_type != BRANCH_DIRECT_JUMP && branch_type != BRANCH_DIRECT_CALL && branch_type != BRANCH_CONDITIONAL);
 				if(warmup_complete[cpu])
-				{ 
+				{
                 	fetch_resume_cycle = current_core_cycle[cpu] + 1; //Resume fetch from next cycle.
 				}
 				fill_btb(ROB.entry[rob_index].ip, ROB.entry[rob_index].branch_target);
@@ -2217,7 +2217,7 @@ void O3_CPU::complete_execution(uint32_t rob_index)
 
 void O3_CPU::reg_RAW_release(uint32_t rob_index)
 {
-    // if (!ROB.entry[rob_index].registers_instrs_depend_on_me.empty()) 
+    // if (!ROB.entry[rob_index].registers_instrs_depend_on_me.empty())
 
     ITERATE_SET(i,ROB.entry[rob_index].registers_instrs_depend_on_me, ROB_SIZE) {
         for (uint32_t j=0; j<NUM_INSTR_SOURCES; j++) {
@@ -2240,7 +2240,7 @@ void O3_CPU::reg_RAW_release(uint32_t rob_index)
 
                         //DP (if (warmup_complete[cpu]) {
                         //cout << "[RTE0] " << __func__ << " instr_id: " << ROB.entry[i].instr_id << " rob_index: " << i << " is added to RTE0";
-                        //cout << " head: " << RTE0_head << " tail: " << RTE0_tail << endl; }); 
+                        //cout << " head: " << RTE0_head << " tail: " << RTE0_tail << endl; });
 
                         RTE0_tail++;
                         if (RTE0_tail == ROB_SIZE)
@@ -2292,7 +2292,7 @@ void O3_CPU::update_rob()
     // update ROB entries with completed executions
     if ((inflight_reg_executions > 0) || (inflight_mem_executions > 0)) {
         if (ROB.head < ROB.tail) {
-            for (uint32_t i=ROB.head; i<ROB.tail; i++) 
+            for (uint32_t i=ROB.head; i<ROB.tail; i++)
                 complete_execution(i);
         }
         else {
@@ -2319,7 +2319,7 @@ void O3_CPU::complete_instr_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
 
     uint64_t complete_ip = queue->entry[index].ip;
 
-//Neelu: Marking IFETCH_BUFFER entries translated and fetched and then returning. 
+//Neelu: Marking IFETCH_BUFFER entries translated and fetched and then returning.
 
      for(uint32_t j=0; j<IFETCH_BUFFER.SIZE; j++)
      {
@@ -2343,7 +2343,7 @@ void O3_CPU::complete_instr_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
     int a;
     if (rob_index != (a = check_rob(queue->entry[index].instr_id)))
     {
-	    //cout << "complete_instr_fetch, rob_index ="<<rob_index<< " a = " << a << endl; 
+	    //cout << "complete_instr_fetch, rob_index ="<<rob_index<< " a = " << a << endl;
 	    assert(0);
     }
 #endif
@@ -2387,7 +2387,7 @@ void O3_CPU::complete_instr_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
 
     // remove this entry
     queue->remove_queue(&queue->entry[index]);
-    
+
 }
 
 void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
@@ -2430,11 +2430,11 @@ void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
             //cout << "[ROB] " << __func__ << " RFO instr_id: " << SQ.entry[sq_index].instr_id;
             //cout << " DTLB_FETCH_DONE translation: " << +SQ.entry[sq_index].translated << hex << " page: " << (SQ.entry[sq_index].physical_address>>LOG2_PAGE_SIZE);
             //cout << " full_addr: " << SQ.entry[sq_index].physical_address << dec << " store_merged: " << +queue->entry[index].store_merged;
-            //cout << " load_merged: " << +queue->entry[index].load_merged << endl; }); 
+            //cout << " load_merged: " << +queue->entry[index].load_merged << endl; });
 
             handle_merged_translation(&queue->entry[index]);
         }
-        else { 
+        else {
             LQ.entry[lq_index].physical_address = (queue->entry[index].data_pa << LOG2_PAGE_SIZE) | (LQ.entry[lq_index].virtual_address & ((1 << LOG2_PAGE_SIZE) - 1)); // translated address
             LQ.entry[lq_index].translated = COMPLETED;
             LQ.entry[lq_index].event_cycle = current_core_cycle[cpu];
@@ -2446,13 +2446,13 @@ void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
 
             //DP (if (warmup_complete[cpu]) {
             //cout << "[RTL1] " << __func__ << " instr_id: " << LQ.entry[lq_index].instr_id << " rob_index: " << LQ.entry[lq_index].rob_index << " is added to RTL1";
-            //cout << " head: " << RTL1_head << " tail: " << RTL1_tail << endl; }); 
+            //cout << " head: " << RTL1_head << " tail: " << RTL1_tail << endl; });
 
             //DP (if (warmup_complete[cpu]) {
             //cout << "[ROB] " << __func__ << " load instr_id: " << LQ.entry[lq_index].instr_id;
             //cout << " DTLB_FETCH_DONE translation: " << +LQ.entry[lq_index].translated << hex << " page: " << (LQ.entry[lq_index].physical_address>>LOG2_PAGE_SIZE);
             //cout << " full_addr: " << LQ.entry[lq_index].physical_address << dec << " store_merged: " << +queue->entry[index].store_merged;
-            //cout << " load_merged: " << +queue->entry[index].load_merged << endl; }); 
+            //cout << " load_merged: " << +queue->entry[index].load_merged << endl; });
 
             handle_merged_translation(&queue->entry[index]);
         }
@@ -2463,7 +2463,7 @@ void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
 
         if (queue->entry[index].type == RFO)
             handle_merged_load(&queue->entry[index]);
-        else { 
+        else {
 #ifdef SANITY_CHECK
             if (queue->entry[index].store_merged)
                 assert(0);
@@ -2486,7 +2486,7 @@ void O3_CPU::complete_data_fetch(PACKET_QUEUE *queue, uint8_t is_it_tlb)
             //cout << "[ROB] " << __func__ << " load instr_id: " << LQ.entry[lq_index].instr_id;
             //cout << " L1D_FETCH_DONE fetched: " << +LQ.entry[lq_index].fetched << hex << " address: " << (LQ.entry[lq_index].physical_address>>LOG2_BLOCK_SIZE);
             //cout << " full_addr: " << LQ.entry[lq_index].physical_address << dec << " remain_mem_ops: " << ROB.entry[rob_index].num_mem_ops;
-            //cout << " load_merged: " << +queue->entry[index].load_merged << " inflight_mem: " << inflight_mem_executions << endl; }); 
+            //cout << " load_merged: " << +queue->entry[index].load_merged << " inflight_mem: " << inflight_mem_executions << endl; });
 
             release_load_queue(lq_index);
             handle_merged_load(&queue->entry[index]);
@@ -2525,11 +2525,11 @@ void O3_CPU::handle_o3_fetch(PACKET *current_packet, uint32_t cache_type)
             //cout << "[ROB] " << __func__ << " RFO instr_id: " << SQ.entry[sq_index].instr_id;
             //cout << " DTLB_FETCH_DONE translation: " << +SQ.entry[sq_index].translated << hex << " page: " << (SQ.entry[sq_index].physical_address>>LOG2_PAGE_SIZE);
             //cout << " full_addr: " << SQ.entry[sq_index].physical_address << dec << " store_merged: " << +current_packet->store_merged;
-            //cout << " load_merged: " << +current_packet->load_merged << endl; }); 
+            //cout << " load_merged: " << +current_packet->load_merged << endl; });
 
             handle_merged_translation(current_packet);
         }
-        else { 
+        else {
             LQ.entry[lq_index].physical_address = (current_packet->data_pa << LOG2_PAGE_SIZE) | (LQ.entry[lq_index].virtual_address & ((1 << LOG2_PAGE_SIZE) - 1)); // translated address
             LQ.entry[lq_index].translated = COMPLETED;
 
@@ -2540,13 +2540,13 @@ void O3_CPU::handle_o3_fetch(PACKET *current_packet, uint32_t cache_type)
 
             //DP (if (warmup_complete[cpu]) {
             //cout << "[RTL1] " << __func__ << " instr_id: " << LQ.entry[lq_index].instr_id << " rob_index: " << LQ.entry[lq_index].rob_index << " is added to RTL1";
-            //cout << " head: " << RTL1_head << " tail: " << RTL1_tail << endl; }); 
+            //cout << " head: " << RTL1_head << " tail: " << RTL1_tail << endl; });
 
             //DP (if (warmup_complete[cpu]) {
             //cout << "[ROB] " << __func__ << " load instr_id: " << LQ.entry[lq_index].instr_id;
             //cout << " DTLB_FETCH_DONE translation: " << +LQ.entry[lq_index].translated << hex << " page: " << (LQ.entry[lq_index].physical_address>>LOG2_PAGE_SIZE);
             //cout << " full_addr: " << LQ.entry[lq_index].physical_address << dec << " store_merged: " << +current_packet->store_merged;
-            //cout << " load_merged: " << +current_packet->load_merged << endl; }); 
+            //cout << " load_merged: " << +current_packet->load_merged << endl; });
 
             handle_merged_translation(current_packet);
         }
@@ -2581,7 +2581,7 @@ void O3_CPU::handle_o3_fetch(PACKET *current_packet, uint32_t cache_type)
             //cout << "[ROB] " << __func__ << " load instr_id: " << LQ.entry[lq_index].instr_id;
             //cout << " L1D_FETCH_DONE fetched: " << +LQ.entry[lq_index].fetched << hex << " address: " << (LQ.entry[lq_index].physical_address>>LOG2_BLOCK_SIZE);
             //cout << " full_addr: " << LQ.entry[lq_index].physical_address << dec << " remain_mem_ops: " << ROB.entry[rob_index].num_mem_ops;
-            //cout << " load_merged: " << +current_packet->load_merged << " inflight_mem: " << inflight_mem_executions << endl; }); 
+            //cout << " load_merged: " << +current_packet->load_merged << " inflight_mem: " << inflight_mem_executions << endl; });
 
             release_load_queue(lq_index);
 
@@ -2629,7 +2629,7 @@ void O3_CPU::handle_merged_translation(PACKET *provider)
 
             //DP (if (warmup_complete[cpu]) {
             //cout << "[RTL1] " << __func__ << " instr_id: " << LQ.entry[merged].instr_id << " rob_index: " << LQ.entry[merged].rob_index << " is added to RTL1";
-            //cout << " head: " << RTL1_head << " tail: " << RTL1_tail << endl; }); 
+            //cout << " head: " << RTL1_head << " tail: " << RTL1_tail << endl; });
 
             //DP (if (warmup_complete[cpu]) {
             //cout << "[ROB] " << __func__ << " load instr_id: " << LQ.entry[merged].instr_id;
@@ -2646,7 +2646,7 @@ void O3_CPU::handle_merged_load(PACKET *provider)
 
         LQ.entry[merged].fetched = COMPLETED;
         LQ.entry[merged].event_cycle = current_core_cycle[cpu];
-     
+
 	ROB.entry[merged_rob_index].num_mem_ops--;
         ROB.entry[merged_rob_index].event_cycle = current_core_cycle[cpu];
 
@@ -2658,7 +2658,7 @@ void O3_CPU::handle_merged_load(PACKET *provider)
 #endif
         if (ROB.entry[merged_rob_index].num_mem_ops == 0)
             inflight_mem_executions++;
-	
+
                //DP (if (warmup_complete[cpu]) {
         //cout << "[ROB] " << __func__ << " load instr_id: " << LQ.entry[merged].instr_id;
         //cout << " L1D_FETCH_DONE translation: " << +LQ.entry[merged].translated << hex << " address: " << (LQ.entry[merged].physical_address>>LOG2_BLOCK_SIZE);
@@ -2678,7 +2678,7 @@ void O3_CPU::release_load_queue(uint32_t lq_index)
 
     LSQ_ENTRY empty_entry;
     LQ.entry[lq_index] = empty_entry;
-    //Neelu: Why isn't ROB's LQ index reset when the LQ entry is removed?  
+    //Neelu: Why isn't ROB's LQ index reset when the LQ entry is removed?
     LQ.occupancy--;
 }
 
@@ -2690,7 +2690,7 @@ void O3_CPU::retire_rob()
 
 
         // retire is in-order
-        if (ROB.entry[ROB.head].executed != COMPLETED) { 
+        if (ROB.entry[ROB.head].executed != COMPLETED) {
 
             //DP ( if (warmup_complete[cpu]) {
             //cout << "[ROB] " << __func__ << " instr_id: " << ROB.entry[ROB.head].instr_id << " head: " << ROB.head << " is not executed yet" << endl; });
@@ -2736,7 +2736,7 @@ void O3_CPU::retire_rob()
                         data_packet.asid[1] = SQ.entry[sq_index].asid[1];
                         data_packet.event_cycle = current_core_cycle[cpu];
 
-			
+
 
                         L1D.add_wq(&data_packet);
 
@@ -2767,7 +2767,7 @@ void O3_CPU::retire_rob()
 
                 LSQ_ENTRY empty_entry;
                 SQ.entry[sq_index] = empty_entry;
-                
+
                 SQ.occupancy--;
                 SQ.head++;
                 if (SQ.head == SQ.SIZE)
@@ -2791,7 +2791,7 @@ void O3_CPU::retire_rob()
         completed_executions--;
         num_retired++;
 
-			
+
     }
 }
 
