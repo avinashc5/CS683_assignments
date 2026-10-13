@@ -49,7 +49,7 @@ extern uint32_t PAGE_TABLE_LATENCY, SWAP_LATENCY;
 #define DTLB_RQ_SIZE 16
 #define DTLB_WQ_SIZE 16
 #define DTLB_PQ_SIZE 8
-#define DTLB_MSHR_SIZE 8	
+#define DTLB_MSHR_SIZE 8
 #define DTLB_LATENCY 1
 
 //@Vasudha: Coding DTLB prefetch buffer
@@ -75,7 +75,7 @@ extern uint32_t PAGE_TABLE_LATENCY, SWAP_LATENCY;
 #define L1I_SET 64
 #define L1I_WAY 8
 #define L1I_RQ_SIZE 64
-#define L1I_WQ_SIZE 64 
+#define L1I_WQ_SIZE 64
 #define L1I_PQ_SIZE 16
 #define L1I_MSHR_SIZE 8
 #define L1I_LATENCY 4
@@ -84,7 +84,7 @@ extern uint32_t PAGE_TABLE_LATENCY, SWAP_LATENCY;
 #define L1D_SET 64
 #define L1D_WAY 12
 #define L1D_RQ_SIZE 64
-#define L1D_WQ_SIZE 64 
+#define L1D_WQ_SIZE 64
 #define L1D_PQ_SIZE 16     //	Neelu: Changed from 8 to 16.
 #define L1D_MSHR_SIZE 16
 #define L1D_LATENCY 5
@@ -127,8 +127,8 @@ class CACHE : public MEMORY {
              pf_fill,
              pf_miss_l1, // Agus
              pf_late,	// Number of On-demand translation requests hit in TLB MSHR with packet.type = PREFETCH.
-             pf_lower_level, // Count prefetch request that enters MSHR as new miss(not merged)-used for TLBs as many prefetches issued gets merged 
-	     pf_lower_level_test, 
+             pf_lower_level, // Count prefetch request that enters MSHR as new miss(not merged)-used for TLBs as many prefetches issued gets merged
+	     pf_lower_level_test,
 	     pf_same_fill_level,
 	     pf_lower_fill_level,
              pf_dropped,
@@ -182,9 +182,9 @@ class CACHE : public MEMORY {
 	     roi_instr_miss[NUM_CPUS][NUM_TYPES];
 
     uint64_t total_miss_latency;
-    
+
     // constructor
-    CACHE(string v1, uint32_t v2, int v3, uint32_t v4, uint32_t v5, uint32_t v6, uint32_t v7, uint32_t v8) 
+    CACHE(string v1, uint32_t v2, int v3, uint32_t v4, uint32_t v5, uint32_t v6, uint32_t v7, uint32_t v8)
         : NAME(v1), NUM_SET(v2), NUM_WAY(v3), NUM_LINE(v4), WQ_SIZE(v5), RQ_SIZE(v6), PQ_SIZE(v7), MSHR_SIZE(v8) {
 
         LATENCY = 0;
@@ -192,7 +192,7 @@ class CACHE : public MEMORY {
         // cache block
         block = new BLOCK* [NUM_SET];
         for (uint32_t i=0; i<NUM_SET; i++) {
-            block[i] = new BLOCK[NUM_WAY]; 
+            block[i] = new BLOCK[NUM_WAY];
 
             for (uint32_t j=0; j<NUM_WAY; j++) {
                 block[i][j].lru = j;
@@ -236,7 +236,7 @@ class CACHE : public MEMORY {
 	pf_lower_fill_level = 0;
 	pf_dropped = 0;
 	//Addition by Neelu begin
-	
+
 //	pq_full = 0;
 //	mshr_full = 0;
 	late_prefetch = 0;
@@ -331,25 +331,25 @@ class CACHE : public MEMORY {
 		 l1i_initialize_replacement(),
  		 l1d_initialize_replacement(),
 		 l2c_initialize_replacement(),
-	 	 llc_initialize_replacement(),		
+	 	 llc_initialize_replacement(),
 		 itlb_initialize_replacement(),
 		 dtlb_initialize_replacement(),
 		 stlb_initialize_replacement(),
 
 
 
-         (CACHE::*update_replacement_state)(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit),
+         (CACHE::*update_replacement_state)(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit, uint8_t isInstruction),
 
 
-	 	base_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit),
-	 	btb_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit),
-        l1i_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit),
-		l1d_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit),
-		l2c_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit),
-		llc_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit),
-		itlb_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit),
-		dtlb_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit),
-		stlb_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit),
+	 	base_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit, uint8_t isInstruction),
+	 	btb_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit, uint8_t isInstruction),
+        l1i_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit, uint8_t isInstruction),
+		l1d_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit, uint8_t isInstruction),
+		l2c_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit, uint8_t isInstruction),
+		llc_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit, uint8_t isInstruction),
+		itlb_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit, uint8_t isInstruction),
+		dtlb_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit, uint8_t isInstruction),
+		stlb_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit, uint8_t isInstruction),
 
 
 
@@ -358,7 +358,7 @@ class CACHE : public MEMORY {
 
 
          (CACHE::*replacement_final_stats)(),
-	
+
 		base_replacement_final_stats(),
 	 	btb_replacement_final_stats(),
         l1i_replacement_final_stats(),
@@ -375,13 +375,13 @@ class CACHE : public MEMORY {
          l2c_prefetcher_initialize(),
          llc_prefetcher_initialize(),
          itlb_prefetcher_initialize(),
-         dtlb_prefetcher_initialize(), 
+         dtlb_prefetcher_initialize(),
          stlb_prefetcher_initialize(),
          prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type),
          l1d_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type, uint8_t critical_ip_flag), //, uint64_t prefetch_id),
          itlb_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type, uint64_t prefetch_id, uint8_t instruction),
          dtlb_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type, uint64_t prefetch_id, uint8_t instruction),
-         stlb_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type, uint64_t prefetch_id, uint8_t instruction), 
+         stlb_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type, uint64_t prefetch_id, uint8_t instruction),
          prefetcher_cache_fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr),
          l1d_prefetcher_cache_fill(uint64_t v_addr,uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t v_evicted_addr, uint64_t evicted_addr, uint32_t metadata_in),
 	 l1d_prefetcher_notify_about_dtlb_eviction(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr, uint32_t metadata_in),
@@ -395,7 +395,7 @@ class CACHE : public MEMORY {
          itlb_prefetcher_final_stats(),
          dtlb_prefetcher_final_stats(),
          stlb_prefetcher_final_stats();
-	
+
     //Neelu: adding for l1i prefetcher
     	void (*l1i_prefetcher_cache_operate)(uint32_t, uint64_t, uint8_t, uint8_t);
 	void (*l1i_prefetcher_cache_fill)(uint32_t, uint64_t, uint32_t, uint32_t, uint8_t, uint64_t);
@@ -405,7 +405,7 @@ class CACHE : public MEMORY {
          llc_prefetcher_operate(uint64_t addr, uint64_t ip, uint8_t cache_hit, uint8_t type, uint32_t metadata_in),
          l2c_prefetcher_cache_fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr, uint32_t metadata_in),
          llc_prefetcher_cache_fill(uint64_t addr, uint32_t set, uint32_t way, uint8_t prefetch, uint64_t evicted_addr, uint32_t metadata_in);
-    
+
     uint32_t get_set(uint64_t address),
              get_way(uint64_t address, uint32_t set),
 

@@ -10,11 +10,11 @@ void CACHE::btb_initialize_replacement()
 uint32_t CACHE::btb_find_victim(uint32_t cpu, uint64_t instr_id, uint32_t set, const BLOCK *current_set, uint64_t ip, uint64_t full_addr, uint32_t type)
 {
     // baseline LRU
-    return lru_victim(cpu, instr_id, set, current_set, ip, full_addr, type); 
+    return lru_victim(cpu, instr_id, set, current_set, ip, full_addr, type);
 }
 
 // called on every cache hit and cache fill
-void CACHE::btb_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit)
+void CACHE::btb_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit, uint8_t isInstruction)
 {
     if ((type == WRITEBACK) && ip)
         assert(0);

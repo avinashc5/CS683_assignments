@@ -9,3 +9,5 @@ solution/
 # llama.cpp demo artifacts (cloned + downloaded by `make llama-demo`, not source)
 task2/llama/llama.cpp/
 task2/llama/models/
+obj/
+traces/
