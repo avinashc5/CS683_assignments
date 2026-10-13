@@ -35,3 +35,13 @@ Writes `results/task1/{tables.md,results.csv,speedup.png,mpki.png,accuracy.png,c
 ## Notes
 - Speedup = IPC / baseline IPC; coverage = (baseline − pf L1D load misses) / baseline; accuracy is the simulator's (useful / prefetches issued to lower level).
 - Do not commit `bin/`, `obj/` or traces (see `.gitignore`).
+
+## Task 3 (SPP + prefetch-aware dynamic I-RRIP)
+    scripts/run_task3.sh [trace_dir]        # build + run everything + analysis
+or step by step:
+
+    scripts/build_task3.sh                  # baseline, spp, dynirrip, spp_dynnopf, spp_dyn, spp_dyn_pfr{1,2,3}
+    scripts/run_all.sh spp_dyn [trace_dir]  # one configuration
+    python3 scripts/analyze_task3.py        # tables + plots -> results/task3/
+- `replacement/dyn_irrip.l2c_repl` – `PF_AWARE` (1 = Task 3, 0 = Task 2B behaviour) and `PF_INSERT_RRPV` (insertion RRPV of prefetched data lines) are `#define`s at the top; the build script generates the variants with `sed` (nothing extra to commit).
+- Compared configurations: baseline, SPP (LRU), dynamic I-RRIP (no prefetcher), SPP + pf-unaware dynamic I-RRIP, SPP + pf-aware dynamic I-RRIP, plus an insertion-RRPV sweep.

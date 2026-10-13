@@ -1,6 +1,8 @@
 #include "cache.h"
 
 #define maxRRPV 3
+#define PF_AWARE 1                                  // 1 = prefetch-aware IRRIP (Task 3), 0 = prefetch-unaware (Task 2B behaviour)
+#define PF_INSERT_RRPV maxRRPV                      // insertion RRPV of a prefetched data line in IRRIP mode (maxRRPV = evict first)
 #define NUM_LEADER_SETS 32                          // leader sets per policy, must be a power of 2
 #define REGION (L2C_SET / NUM_LEADER_SETS)          // cache is split into NUM_LEADER_SETS regions of REGION sets
 #define REGION_BITS __builtin_ctz(REGION)
@@ -13,6 +15,7 @@ uint64_t follower_updates[2];           // follower set updates in SRRIP (0) / I
 uint64_t mode_switches;                 // number of times the follower policy (psel MSB) flipped
 uint64_t leader_misses[2][2];           // [leader policy SRRIP/IRRIP][data/instruction]
 uint8_t last_follower_policy;
+uint64_t pf_fills, pf_hits_no_promote;  // IRRIP mode: prefetch fills inserted at PF_INSERT_RRPV / prefetch hits that were not promoted
 
 // Check which leader set the cache line belongs to
 // One SRRIP leader and one IRRIP leader per region: the offset within the region is compared
@@ -75,6 +78,7 @@ void CACHE::l2c_initialize_replacement()
     for (int i = 0; i < 2; i++)
         leader_misses[i][0] = leader_misses[i][1] = 0;
     last_follower_policy = psel >> 7;
+    pf_fills = pf_hits_no_promote = 0;
 }
 
 // find replacement victim
@@ -169,15 +173,21 @@ void CACHE::l2c_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t wa
     }
     else { // IRRIP
         /*
-            POLICY
-            Insertion: For instructions, insert at 0. For non-instructions, insert at 2
-            Promotion: For instructions, promote to 0. For non-instructions, promote to rrpv - 1
+            POLICY (prefetch aware)
+            Insertion: For instructions, insert at 0. For prefetched data lines, insert at PF_INSERT_RRPV (they are speculative and
+                       are already brought into L1D, so they must not displace useful demand data). For other data, insert at 2
+            Promotion: For instructions, promote to 0. A prefetch that hits is not a reuse, so it does not promote the line.
+                       For demand data, promote to rrpv - 1 (this is also how a prefetched line becomes "useful" and moves up)
             Eviction: Evict the first line that you find with maxRRPV
         */
 
         if (hit){
             if (isInstruction){
                 l2_rrpv[set][way] = 0;
+            }
+            else if (PF_AWARE && type == PREFETCH){
+                if (warmup_complete[cpu])
+                    pf_hits_no_promote++;
             }
             else {
                 if (l2_rrpv[set][way] > 0)
@@ -186,6 +196,11 @@ void CACHE::l2c_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t wa
         }
         else if (isInstruction)
             l2_rrpv[set][way] = 0;
+        else if (PF_AWARE && type == PREFETCH){
+            l2_rrpv[set][way] = PF_INSERT_RRPV;
+            if (warmup_complete[cpu])
+                pf_fills++;
+        }
         else
             l2_rrpv[set][way] = maxRRPV - 1;
     }
@@ -205,4 +220,5 @@ void CACHE::l2c_replacement_final_stats()
     cout << "Mode switches: " << mode_switches << endl;
     cout << "SRRIP leader misses  data: " << leader_misses[0][0] << "  instr: " << leader_misses[0][1] << endl;
     cout << "IRRIP leader misses  data: " << leader_misses[1][0] << "  instr: " << leader_misses[1][1] << endl;
+    cout << "Prefetch fills inserted at RRPV " << PF_INSERT_RRPV << ": " << pf_fills << "  prefetch hits not promoted: " << pf_hits_no_promote << endl;
 }
