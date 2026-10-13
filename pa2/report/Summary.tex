@@ -2,7 +2,7 @@
 \usepackage[margin=2cm]{geometry}
 \usepackage{booktabs,graphicx,float,enumitem,hyperref}
 \setlength{\parindent}{0pt}\setlength{\parskip}{4pt}
-\title{CS683 PA2 -- Summary\\ \large Task 1: Stride Pattern Prefetcher (L1D)}
+\title{CS683 PA2 -- Summary\\ \large Task 1: Stride Pattern Prefetcher (L1D); Task 3: SPP + prefetch-aware Dynamic I-RRIP}
 \date{}
 \begin{document}\maketitle
 \section*{Task 1A: IP-stride (baseline prefetcher)}
@@ -48,6 +48,21 @@ Pattern table, no fallback & 1.0100 & \\
 Pattern table + fallback (final) & 1.0122 & \\\bottomrule\end{tabular}
 
 IP-table size (without fallback): 64/128/256/512/1024 entries $\to$ 1.0054/1.0078/1.0100/1.0107/1.0111 (6.7/10.3/17.6/32.2/61.4 Kbit); 256 chosen as the knee. A single 2-stride table alone reached 1.0126, within noise of the final hybrid; the hybrid was kept because the 3-stride signature disambiguates longer patterns. Synthetic tests (uniform, non-uniform, phase changes, random, interleaved IPs) give about 97\% coverage on regular streams, about 0\% on random, and 0 page-boundary violations in 186K prefetches; the one weakness is interleaved IPs sharing a signature in the pattern table (78\%), a known trade-off since IP bits in the index lowered real-trace speedup.
+
+\section*{Task 3: SPP with prefetch-aware Dynamic I-RRIP}
+\textbf{Policy} (\texttt{replacement/dyn\_irrip.l2c\_repl}, applied in I-RRIP mode only; the RRIP leader sets are unchanged so set dueling still compares against plain RRIP). A prefetched data line is inserted at RRPV 3 (first eviction candidate) instead of 2, and a prefetch request that hits a resident line does not promote it. Instruction lines are unchanged (insert/promote to 0); demand hits on data still promote by one step, so a prefetched line that is actually used moves up. Eviction is unchanged.
+
+\textbf{Rationale.} SPP brings lines into L1D, so the L2 copy of a prefetched line is a duplicate that is only needed if the L1D copy is evicted before use; a speculative line should therefore not displace demand data or instruction lines, which the L2 is supposed to protect. A prefetch hit is not evidence of reuse (the prefetcher re-requests a line it already fetched), so promoting on it would keep stale lines alive. Inserting at the distant position lets a useless prefetch leave quickly, while a demand hit still rescues a useful one. The insertion RRPV was swept (1/2/3); distant insertion is best on mean speedup.
+
+\textbf{Results} (25M warmup + 25M simulation instructions; speedup is geometric mean over the three traces).
+\input{tables3.tex}
+\begin{figure}[H]\centering
+\includegraphics[width=.48\linewidth]{../results/task3/speedup.png}\includegraphics[width=.48\linewidth]{../results/task3/l2_mpki.png}\\
+\includegraphics[width=.48\linewidth]{../results/task3/l2_instr_mpki.png}\includegraphics[width=.48\linewidth]{../results/task3/l2_data_mpki.png}\\
+\includegraphics[width=.48\linewidth]{../results/task3/accuracy.png}\includegraphics[width=.48\linewidth]{../results/task3/coverage.png}\\
+\includegraphics[width=.48\linewidth]{../results/task3/l1d_mpki.png}\includegraphics[width=.48\linewidth]{../results/task3/pf_insert_sweep.png}
+\end{figure}
+\textbf{Findings.} SPP + prefetch-aware Dyn I-RRIP reaches mean speedup 1.0146, against 1.0122 for SPP alone, 1.0017 for Dynamic I-RRIP alone and 1.0139 for SPP with the prefetch-unaware Dynamic I-RRIP; its IPC is highest on all three traces (0.2344/0.2564/0.3875), so it outperforms both SPP and Dynamic I-RRIP in IPC. The margins are small: on Trace 1 the gain over SPP is $\approx$0.0001 IPC, and the gain over the prefetch-unaware policy is 0.0007 in mean speedup, within noise for a single 25M-instruction window. The effect is clearest at L2: mean L2 load MPKI falls from 15.01 (unaware) to 14.91, and L2 instruction load MPKI from 9.58 to 9.47, because prefetch fills no longer displace instruction lines. L2 data load MPKI is slightly higher than unaware (5.43 vs 5.42), and prefetch accuracy and coverage at L1D are essentially unchanged (49.5\% / 8.7\%), since the change affects L2 residency, not what is prefetched.
 
 \section*{Limitations}
 One 25M-instruction window per trace (the simulator is deterministic, but differences of $\sim$0.1\% may not generalise). ChampSim's warmup skips front-end stalls, so the measured region starts with caches and tables relatively cold; this affects all configurations equally. The accuracy counter does not track prefetches that fill L2.

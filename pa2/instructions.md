@@ -3,7 +3,7 @@
 ## Requirements
 - **GCC/G++ 7** (the old ChampSim code crashes with "stack smashing" under GCC 13). See README.md.
 - Python 3 with matplotlib (plots); `pdflatex` (report).
-- Traces (not included): put `Trace1.gz Trace2.gz Trace3.gz` in a directory, e.g. `../traces`.
+- Traces (not included): put `Trace1.gz Trace2.gz Trace3.gz` in a directory, e.g. `../traces`. The path must not contain spaces (ChampSim passes it to `gzip` through `popen`); use symlinks if needed.
 
 ## Build (from this directory)
     ./build_champsim.sh no        lru baseline    # no prefetcher
@@ -30,7 +30,7 @@ Writes `results/task1/{tables.md,results.csv,speedup.png,mpki.png,accuracy.png,c
 - `prefetcher/spp.l1d_pref` – SPP implementation; header comment has the storage breakdown; all tunables are `#define`s at the top.
 - `results/task1/synthetic_tests.txt` – synthetic pattern tests (coverage, page-boundary violations).
 - `results/task1/ablation_sweeps.txt` – ablation/tuning sweeps (speedup, coverage, accuracy per config).
-- `report/Summary.pdf` – Task 1 summary (Tasks 2/3 pending).
+- `report/Summary.pdf` – Task 1 summary (Task 3 section added, Task 2 section pending).
 
 ## Notes
 - Speedup = IPC / baseline IPC; coverage = (baseline − pf L1D load misses) / baseline; accuracy is the simulator's (useful / prefetches issued to lower level).

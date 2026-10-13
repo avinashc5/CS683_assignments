@@ -98,3 +98,15 @@ plot("l2_mpki", "L2C load MPKI", "Task 3: L2C load MPKI", "l2_mpki.png", CFGS, f
 plot("l2_instr", "L2C instruction load MPKI", "Task 3: L2 instruction MPKI", "l2_instr_mpki.png", CFGS, fmt="{:.2f}")
 plot("l2_data", "L2C data load MPKI", "Task 3: L2 data MPKI", "l2_data_mpki.png", CFGS, fmt="{:.2f}")
 plot("speedup", "Speedup over baseline", "Task 3: prefetch insertion RRPV sweep", "pf_insert_sweep.png", SWEEP + CFGS[1:4], ref=1.0, fmt="{:.4f}")
+
+# LaTeX tables for report/Summary.tex
+tex = []
+for key, title, fmt in metrics:
+    tex.append("\\textbf{%s}\\\\[2pt]\n\\begin{tabular}{lrrrr}\\toprule\nConfig & Trace1 & Trace2 & Trace3 & Mean \\\\ \\midrule" % title)
+    for c, lab in cfgs:
+        v = [D[c][t][key] for t in TRACES]
+        m = gmean(v) if key == "speedup" else mean(v)
+        f = lambda x: "--" if x != x else fmt.format(x)
+        tex.append("%s & %s & %s \\\\" % (lab.replace("&", "\\&"), " & ".join(f(x) for x in v), f(m)))
+    tex.append("\\bottomrule\\end{tabular}\n\\medskip\n")
+open(os.path.join(ROOT, "report", "tables3.tex"), "w").write("\n".join(tex))

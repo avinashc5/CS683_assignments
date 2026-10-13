@@ -1,0 +1,111 @@
+\textbf{IPC}\\[2pt]
+\begin{tabular}{lrrrr}\toprule
+Config & Trace1 & Trace2 & Trace3 & Mean \\ \midrule
+Baseline (no pf, LRU) & 0.2323 & 0.2512 & 0.3821 & 0.2885 \\
+SPP & 0.2343 & 0.2549 & 0.3872 & 0.2921 \\
+Dynamic IRRIP & 0.2323 & 0.2525 & 0.3821 & 0.2889 \\
+SPP + Dyn IRRIP (pf-unaware) & 0.2342 & 0.2562 & 0.3874 & 0.2926 \\
+SPP + Dyn IRRIP (pf-aware) & 0.2344 & 0.2564 & 0.3875 & 0.2928 \\
+PF insert RRPV 1 & 0.2342 & 0.2557 & 0.3872 & 0.2923 \\
+PF insert RRPV 2 & 0.2344 & 0.2561 & 0.3874 & 0.2926 \\
+PF insert RRPV 3 (final) & 0.2344 & 0.2564 & 0.3875 & 0.2928 \\
+\bottomrule\end{tabular}
+\medskip
+
+\textbf{Speedup over baseline}\\[2pt]
+\begin{tabular}{lrrrr}\toprule
+Config & Trace1 & Trace2 & Trace3 & Mean \\ \midrule
+Baseline (no pf, LRU) & 1.0000 & 1.0000 & 1.0000 & 1.0000 \\
+SPP & 1.0082 & 1.0149 & 1.0135 & 1.0122 \\
+Dynamic IRRIP & 0.9997 & 1.0052 & 1.0000 & 1.0017 \\
+SPP + Dyn IRRIP (pf-unaware) & 1.0078 & 1.0200 & 1.0139 & 1.0139 \\
+SPP + Dyn IRRIP (pf-aware) & 1.0087 & 1.0208 & 1.0143 & 1.0146 \\
+PF insert RRPV 1 & 1.0079 & 1.0179 & 1.0134 & 1.0131 \\
+PF insert RRPV 2 & 1.0087 & 1.0197 & 1.0140 & 1.0141 \\
+PF insert RRPV 3 (final) & 1.0087 & 1.0208 & 1.0143 & 1.0146 \\
+\bottomrule\end{tabular}
+\medskip
+
+\textbf{L1D load MPKI}\\[2pt]
+\begin{tabular}{lrrrr}\toprule
+Config & Trace1 & Trace2 & Trace3 & Mean \\ \midrule
+Baseline (no pf, LRU) & 10.678 & 13.538 & 3.403 & 9.206 \\
+SPP & 9.653 & 12.907 & 3.017 & 8.526 \\
+Dynamic IRRIP & 10.678 & 13.538 & 3.403 & 9.207 \\
+SPP + Dyn IRRIP (pf-unaware) & 9.657 & 12.906 & 3.017 & 8.526 \\
+SPP + Dyn IRRIP (pf-aware) & 9.661 & 12.906 & 3.000 & 8.523 \\
+PF insert RRPV 1 & 9.657 & 12.904 & 3.025 & 8.529 \\
+PF insert RRPV 2 & 9.656 & 12.904 & 3.014 & 8.525 \\
+PF insert RRPV 3 (final) & 9.661 & 12.906 & 3.000 & 8.523 \\
+\bottomrule\end{tabular}
+\medskip
+
+\textbf{L1D prefetch accuracy (%)}\\[2pt]
+\begin{tabular}{lrrrr}\toprule
+Config & Trace1 & Trace2 & Trace3 & Mean \\ \midrule
+Baseline (no pf, LRU) & -- & -- & -- & -- \\
+SPP & 52.49 & 59.53 & 36.27 & 49.43 \\
+Dynamic IRRIP & -- & -- & -- & -- \\
+SPP + Dyn IRRIP (pf-unaware) & 52.52 & 59.68 & 36.21 & 49.47 \\
+SPP + Dyn IRRIP (pf-aware) & 52.08 & 59.61 & 36.94 & 49.54 \\
+PF insert RRPV 1 & 52.03 & 59.68 & 35.92 & 49.21 \\
+PF insert RRPV 2 & 52.35 & 59.72 & 36.36 & 49.48 \\
+PF insert RRPV 3 (final) & 52.08 & 59.61 & 36.94 & 49.54 \\
+\bottomrule\end{tabular}
+\medskip
+
+\textbf{L1D load coverage (%)}\\[2pt]
+\begin{tabular}{lrrrr}\toprule
+Config & Trace1 & Trace2 & Trace3 & Mean \\ \midrule
+Baseline (no pf, LRU) & 0.00 & 0.00 & 0.00 & 0.00 \\
+SPP & 9.60 & 4.66 & 11.36 & 8.54 \\
+Dynamic IRRIP & 0.00 & -0.00 & 0.00 & -0.00 \\
+SPP + Dyn IRRIP (pf-unaware) & 9.57 & 4.67 & 11.36 & 8.53 \\
+SPP + Dyn IRRIP (pf-aware) & 9.52 & 4.67 & 11.84 & 8.68 \\
+PF insert RRPV 1 & 9.56 & 4.68 & 11.11 & 8.45 \\
+PF insert RRPV 2 & 9.57 & 4.68 & 11.45 & 8.57 \\
+PF insert RRPV 3 (final) & 9.52 & 4.67 & 11.84 & 8.68 \\
+\bottomrule\end{tabular}
+\medskip
+
+\textbf{L2C load MPKI}\\[2pt]
+\begin{tabular}{lrrrr}\toprule
+Config & Trace1 & Trace2 & Trace3 & Mean \\ \midrule
+Baseline (no pf, LRU) & 17.696 & 27.357 & 3.954 & 16.336 \\
+SPP & 16.880 & 26.784 & 3.456 & 15.707 \\
+Dynamic IRRIP & 17.590 & 25.298 & 3.899 & 15.595 \\
+SPP + Dyn IRRIP (pf-unaware) & 16.891 & 24.736 & 3.396 & 15.008 \\
+SPP + Dyn IRRIP (pf-aware) & 16.749 & 24.609 & 3.359 & 14.906 \\
+PF insert RRPV 1 & 16.905 & 25.093 & 3.422 & 15.140 \\
+PF insert RRPV 2 & 16.767 & 24.779 & 3.388 & 14.978 \\
+PF insert RRPV 3 (final) & 16.749 & 24.609 & 3.359 & 14.906 \\
+\bottomrule\end{tabular}
+\medskip
+
+\textbf{L2C instruction load MPKI}\\[2pt]
+\begin{tabular}{lrrrr}\toprule
+Config & Trace1 & Trace2 & Trace3 & Mean \\ \midrule
+Baseline (no pf, LRU) & 10.338 & 18.853 & 1.124 & 10.105 \\
+SPP & 10.389 & 18.882 & 1.144 & 10.138 \\
+Dynamic IRRIP & 10.408 & 17.195 & 1.029 & 9.544 \\
+SPP + Dyn IRRIP (pf-unaware) & 10.464 & 17.244 & 1.043 & 9.583 \\
+SPP + Dyn IRRIP (pf-aware) & 10.306 & 17.088 & 1.024 & 9.472 \\
+PF insert RRPV 1 & 10.475 & 17.677 & 1.055 & 9.736 \\
+PF insert RRPV 2 & 10.335 & 17.292 & 1.042 & 9.556 \\
+PF insert RRPV 3 (final) & 10.306 & 17.088 & 1.024 & 9.472 \\
+\bottomrule\end{tabular}
+\medskip
+
+\textbf{L2C data load MPKI}\\[2pt]
+\begin{tabular}{lrrrr}\toprule
+Config & Trace1 & Trace2 & Trace3 & Mean \\ \midrule
+Baseline (no pf, LRU) & 7.358 & 8.504 & 2.830 & 6.231 \\
+SPP & 6.491 & 7.903 & 2.312 & 5.569 \\
+Dynamic IRRIP & 7.181 & 8.102 & 2.869 & 6.051 \\
+SPP + Dyn IRRIP (pf-unaware) & 6.427 & 7.493 & 2.353 & 5.424 \\
+SPP + Dyn IRRIP (pf-aware) & 6.443 & 7.522 & 2.335 & 5.433 \\
+PF insert RRPV 1 & 6.431 & 7.417 & 2.367 & 5.405 \\
+PF insert RRPV 2 & 6.431 & 7.487 & 2.346 & 5.422 \\
+PF insert RRPV 3 (final) & 6.443 & 7.522 & 2.335 & 5.433 \\
+\bottomrule\end{tabular}
+\medskip
