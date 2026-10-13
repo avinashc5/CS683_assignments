@@ -1,0 +1,54 @@
+\documentclass[10pt]{article}
+\usepackage[margin=2cm]{geometry}
+\usepackage{booktabs,graphicx,float,enumitem,hyperref}
+\setlength{\parindent}{0pt}\setlength{\parskip}{4pt}
+\title{CS683 PA2 -- Summary\\ \large Task 1: Stride Pattern Prefetcher (L1D)}
+\date{}
+\begin{document}\maketitle
+\section*{Task 1A: IP-stride (baseline prefetcher)}
+\texttt{ip\_stride.l1d\_pref} keeps 24 IP trackers (IP, last line address, last stride, LRU). On an access by a tracked IP it computes the stride from the last line; if it equals the stored stride it prefetches the next 3 strides ahead (same page only), otherwise it just stores the new stride. It therefore captures only a \emph{constant} stride and is blind to repeating non-uniform sequences such as $(1,2,3)^n$. It is tracked by a fully-associative LRU table of 24 entries, so IPs beyond 24 thrash it.
+
+\section*{Task 1B: SPP design}
+\begin{itemize}[nosep]
+\item \textbf{IP table} (256 entries, direct mapped, 8-bit tag): last line (low 16 bits), last stride, a 2-bit uniform-stride confidence, and a signature of the last 3 strides (7 bits each).
+\item \textbf{Pattern table} (256 entries) indexed by a hash of the 3-stride signature $\rightarrow$ (next stride, 2-bit confidence). A \textbf{fallback table} (64 entries) is keyed by the last 2 strides and is used when the 3-stride entry is not confident.
+\item \textbf{Prediction}: if the uniform confidence is high the constant stride is used; otherwise the pattern table is walked, feeding each predicted stride back into the signature, up to the current degree. Prefetching stops at the 4KB page boundary and when the prefetch queue is full. Only loads/RFOs train. Prefetches fill L1D unless the MSHR is more than half full, then L2.
+\item \textbf{Accuracy throttling}: a 64-entry filter of recently filled prefetch lines; a demand hit on it counts as useful. Every 256 prefetch fills accuracy is computed and the degree set: $\ge$75\%$\to$6, $\ge$50\%$\to$4, $\ge$25\%$\to$2, else 1 (initial 4).
+\end{itemize}
+
+\section*{Results (25M warmup + 25M simulated instructions)}
+Speedup = IPC / baseline IPC (mean = geometric). Coverage = (baseline L1D load misses $-$ misses with prefetcher)/baseline. Accuracy is the simulator's (useful / prefetches issued to the lower level).
+\input{tables.tex}
+\begin{figure}[H]\centering
+\includegraphics[width=.48\linewidth]{../results/task1/speedup.png}\includegraphics[width=.48\linewidth]{../results/task1/mpki.png}\\
+\includegraphics[width=.48\linewidth]{../results/task1/accuracy.png}\includegraphics[width=.48\linewidth]{../results/task1/coverage.png}
+\end{figure}
+SPP beats IP-stride on every trace in speedup and coverage (mean speedup 1.0122 vs 1.0024; coverage 8.5\% vs 2.8\%), and has higher accuracy on Trace 2 and 3 (tied on Trace 1). Gains are small in absolute terms: a miss breakdown showed most L1D misses come from IPs not in the table, strides beyond a page (forbidden by the spec) or irregular accesses; only about 3--5\% of misses occur while a stride pattern is active.
+
+\section*{Storage overhead (exact)}
+\begin{tabular}{lll r}\toprule
+Structure & Entries & Bits per entry & Total bits\\\midrule
+IP table & 256 & valid 1 + tag 8 + last line 16 + last stride 7 + uni conf 2 + 3$\times$7 signature + hist count 2 = 57 & 14592\\
+Pattern table & 256 & stride 7 + conf 2 = 9 & 2304\\
+Fallback table & 64 & stride 7 + conf 2 = 9 & 576\\
+Recent-prefetch filter & 64 & valid 1 + tag 10 = 11 & 704\\
+Counters & -- & issued 9 + useful 9 + degree 3 & 21\\\midrule
+\textbf{Total} & & & \textbf{18197 bits (2274.6 B $\approx$ 2.2 KB)}\\\bottomrule
+\end{tabular}
+
+For comparison, the provided IP-stride uses 24 $\times$ (64+64+64+32) = 5376 bits as coded; SPP uses about 3.4$\times$ more storage.
+
+\section*{Threshold and degree rationale}
+Accuracy thresholds 75/50/25\% divide accuracy into four bands: above 75\% prefetches are almost always used, so aggressive depth (6) is cheap; 50--75\% is the normal band (4); 25--50\% means over half the prefetches are wasted, so depth is halved (2); below 25\% prefetching costs more bandwidth and L1D pollution than it saves, so only one line is issued. The values are round quartile boundaries; I validated them by sweeping: thresholds 50/30/10, 60/40/20, 90/70/40 and degree sets (8,4,2,1), (8,6,4,2) all lie within $\pm$0.1\% of mean speedup (1.0115--1.0129), so the result is insensitive to them. Fixed degrees 1/2/4/6 give mean speedups 1.0076/1.0091/1.0101/1.0102, so deeper is better up to 4, and flat beyond. \textbf{Honest finding:} dynamic throttling gives the same speedup as fixed degree 4 (1.0122 vs 1.0124) but 4--9 points higher accuracy, i.e.\ it saves bandwidth without losing performance.
+
+\section*{Ablations and design validation}
+\begin{tabular}{lcc}\toprule Configuration & Mean speedup & Note\\\midrule
+Uniform stride only (no pattern table) & 1.0043 & $\approx$ IP-stride-like\\
+Pattern table, no fallback & 1.0100 & \\
+Pattern table + fallback (final) & 1.0122 & \\\bottomrule\end{tabular}
+
+IP-table size (without fallback): 64/128/256/512/1024 entries $\to$ 1.0054/1.0078/1.0100/1.0107/1.0111 (6.7/10.3/17.6/32.2/61.4 Kbit); 256 chosen as the knee. A single 2-stride table alone reached 1.0126, within noise of the final hybrid; the hybrid was kept because the 3-stride signature disambiguates longer patterns. Synthetic tests (uniform, non-uniform, phase changes, random, interleaved IPs) give about 97\% coverage on regular streams, about 0\% on random, and 0 page-boundary violations in 186K prefetches; the one weakness is interleaved IPs sharing a signature in the pattern table (78\%), a known trade-off since IP bits in the index lowered real-trace speedup.
+
+\section*{Limitations}
+One 25M-instruction window per trace (the simulator is deterministic, but differences of $\sim$0.1\% may not generalise). ChampSim's warmup skips front-end stalls, so the measured region starts with caches and tables relatively cold; this affects all configurations equally. The accuracy counter does not track prefetches that fill L2.
+\end{document}

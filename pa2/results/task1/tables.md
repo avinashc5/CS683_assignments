@@ -1,0 +1,39 @@
+**IPC**
+
+| Config | Trace1 | Trace2 | Trace3 | Mean |
+|---|---|---|---|---|
+| No prefetcher | 0.2323 | 0.2512 | 0.3821 | 0.2885 |
+| IP-stride | 0.2335 | 0.2513 | 0.3829 | 0.2892 |
+| SPP (ours) | 0.2343 | 0.2549 | 0.3872 | 0.2921 |
+
+**Speedup**
+
+| Config | Trace1 | Trace2 | Trace3 | Mean |
+|---|---|---|---|---|
+| No prefetcher | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
+| IP-stride | 1.0048 | 1.0004 | 1.0021 | 1.0024 |
+| SPP (ours) | 1.0082 | 1.0149 | 1.0135 | 1.0122 |
+
+**L1D load MPKI**
+
+| Config | Trace1 | Trace2 | Trace3 | Mean |
+|---|---|---|---|---|
+| No prefetcher | 10.678 | 13.538 | 3.403 | 9.206 |
+| IP-stride | 10.119 | 13.438 | 3.318 | 8.958 |
+| SPP (ours) | 9.653 | 12.907 | 3.017 | 8.526 |
+
+**Prefetch accuracy (%)**
+
+| Config | Trace1 | Trace2 | Trace3 | Mean |
+|---|---|---|---|---|
+| No prefetcher | – | – | – | – |
+| IP-stride | 52.71 | 38.18 | 15.99 | 35.63 |
+| SPP (ours) | 52.49 | 59.53 | 36.27 | 49.43 |
+
+**L1D load coverage (%)**
+
+| Config | Trace1 | Trace2 | Trace3 | Mean |
+|---|---|---|---|---|
+| No prefetcher | – | – | – | – |
+| IP-stride | 5.24 | 0.74 | 2.51 | 2.83 |
+| SPP (ours) | 9.60 | 4.66 | 11.36 | 8.54 |
