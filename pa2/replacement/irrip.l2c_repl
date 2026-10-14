@@ -3,6 +3,14 @@
 #define maxRRPV 3
 uint32_t l2_rrpv[L2C_SET][L2C_WAY];
 
+/*
+    I-RRIP POLICY (configuration s2_i1_d3_p1_a0 from replacement/irrip_policies.l2c_repl)
+    Insertion: instruction lines at RRPV 1, data lines at RRPV 3 (maxRRPV)
+    Promotion: instruction lines to RRPV 0, data lines decrement RRPV by 1
+    Eviction:  among lines at maxRRPV, evict a data line before an instruction line;
+               aging is the same as SRRIP
+*/
+
 // initialize replacement state
 void CACHE::l2c_initialize_replacement()
 {
@@ -16,15 +24,22 @@ void CACHE::l2c_initialize_replacement()
 }
 
 // find replacement victim
+// current_set[i].instruction is set by fill_cache (src/cache.cc) for L2C lines filled by instruction loads/prefetches
 uint32_t CACHE::l2c_find_victim(uint32_t cpu, uint64_t instr_id, uint32_t set, const BLOCK *current_set, uint64_t ip, uint64_t full_addr, uint32_t type)
 {
-    // A small improvement can be to find out all the ones with rrpv = 3 and then return the one which is data and not instruction. are those 2 distinguishable tho?
     while (1)
     {
+        // first look for a data line at maxRRPV
+        for (int i = 0; i < L2C_WAY; i++)
+            if (l2_rrpv[set][i] == maxRRPV && !current_set[i].instruction)
+                return i;
+
+        // only instruction lines are at maxRRPV (if any)
         for (int i = 0; i < L2C_WAY; i++)
             if (l2_rrpv[set][i] == maxRRPV)
                 return i;
 
+        // no line at maxRRPV, age the set
         for (int i = 0; i < L2C_WAY; i++)
             l2_rrpv[set][i]++;
     }
@@ -63,27 +78,18 @@ void CACHE::l2c_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t wa
     if ((type == WRITEBACK) && ip)
         assert(0);
 
-
-    /*
-        POLICY
-        Insertion: For instructions, insert at 0. For non-instructions, insert at 2
-        Promotion: For instructions, promote to 0. For non-instructions, promote to rrpv - 1
-        Eviction: Evict the first line that you find with maxRRPV
-    */
-
-    if (hit){
-        if (isInstruction){
+    if (hit){ // promotion
+        if (isInstruction)
             l2_rrpv[set][way] = 0;
-        }
-        else {
-            if (l2_rrpv[set][way] > 0)
-                l2_rrpv[set][way]--;
-        }
+        else if (l2_rrpv[set][way] > 0)
+            l2_rrpv[set][way]--;
     }
-    else if (isInstruction)
-        l2_rrpv[set][way] = 0;
-    else
-        l2_rrpv[set][way] = maxRRPV - 1;
+    else { // insertion
+        if (isInstruction)
+            l2_rrpv[set][way] = 1;
+        else
+            l2_rrpv[set][way] = maxRRPV;
+    }
 }
 
 // use this function to print out your own stats at the end of simulation

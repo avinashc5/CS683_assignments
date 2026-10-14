@@ -1,0 +1,190 @@
+#include "cache.h"
+
+#define maxRRPV 3
+
+/*
+    POLICY KNOBS
+    Each knob controls one part of the policy (insertion, promotion, eviction) independently.
+    Setting every knob to its SRRIP value gives plain SRRIP, which allows ablation of each part.
+    Defaults correspond to the original I-RRIP implementation.
+*/
+
+// Insertion RRPV for instruction lines: 0, 1, or 2 (2 = same as SRRIP)
+#ifndef INSTR_INSERT_RRPV
+#define INSTR_INSERT_RRPV 0
+#endif
+
+// Insertion for data lines
+//   0: insert at RRPV 2 (SRRIP)
+//   1: insert at RRPV 3
+//   2: bimodal: insert at RRPV 3, but at RRPV 2 once every BIP_EPSILON data insertions
+#ifndef DATA_INSERT_MODE
+#define DATA_INSERT_MODE 0
+#endif
+
+#ifndef BIP_EPSILON
+#define BIP_EPSILON 32
+#endif
+
+// Promotion on hit for instruction lines
+//   0: promote to RRPV 0 (SRRIP)
+//   1: decrement RRPV by 1
+#ifndef INSTR_PROMOTE_MODE
+#define INSTR_PROMOTE_MODE 0
+#endif
+
+// Promotion on hit for data lines
+//   0: promote to RRPV 0 (SRRIP)
+//   1: decrement RRPV by 1
+//   2: leave RRPV unchanged
+#ifndef DATA_PROMOTE_MODE
+#define DATA_PROMOTE_MODE 1
+#endif
+
+// Eviction: among lines at maxRRPV, evict a data line before an instruction line (0: off = SRRIP, 1: on)
+#ifndef EVICT_PREFER_DATA
+#define EVICT_PREFER_DATA 0
+#endif
+
+// Eviction: while aging, data lines age by 2 and instruction lines by 1 (0: off = SRRIP, 1: on)
+#ifndef EVICT_AGE_DATA_FASTER
+#define EVICT_AGE_DATA_FASTER 0
+#endif
+
+uint32_t l2_rrpv[L2C_SET][L2C_WAY];
+uint32_t bip_counter;   // counts data insertions for the bimodal insertion mode
+
+// initialize replacement state
+void CACHE::l2c_initialize_replacement()
+{
+    cout << "Initialize IRRIP (policy knobs) state for L2C" << endl;
+    cout << "IRRIP knobs: INSTR_INSERT_RRPV=" << INSTR_INSERT_RRPV
+         << " DATA_INSERT_MODE=" << DATA_INSERT_MODE
+         << " BIP_EPSILON=" << BIP_EPSILON
+         << " INSTR_PROMOTE_MODE=" << INSTR_PROMOTE_MODE
+         << " DATA_PROMOTE_MODE=" << DATA_PROMOTE_MODE
+         << " EVICT_PREFER_DATA=" << EVICT_PREFER_DATA
+         << " EVICT_AGE_DATA_FASTER=" << EVICT_AGE_DATA_FASTER << endl;
+
+    for (int i = 0; i < L2C_SET; i++){
+        for (int j = 0; j < L2C_WAY; j++){
+            l2_rrpv[i][j] = maxRRPV;
+        }
+    }
+
+    bip_counter = 0;
+}
+
+// find replacement victim
+// current_set[i].instruction is set by fill_cache (src/cache.cc) for L2C lines filled by instruction loads/prefetches
+uint32_t CACHE::l2c_find_victim(uint32_t cpu, uint64_t instr_id, uint32_t set, const BLOCK *current_set, uint64_t ip, uint64_t full_addr, uint32_t type)
+{
+    while (1)
+    {
+#if EVICT_PREFER_DATA
+        // first look for a data line at maxRRPV
+        for (int i = 0; i < L2C_WAY; i++)
+            if (l2_rrpv[set][i] == maxRRPV && !current_set[i].instruction)
+                return i;
+#endif
+
+        // otherwise the first line at maxRRPV (only instruction lines are left if EVICT_PREFER_DATA is on)
+        for (int i = 0; i < L2C_WAY; i++)
+            if (l2_rrpv[set][i] == maxRRPV)
+                return i;
+
+        // no line at maxRRPV, age the set
+        for (int i = 0; i < L2C_WAY; i++) {
+#if EVICT_AGE_DATA_FASTER
+            if (!current_set[i].instruction) {
+                l2_rrpv[set][i] += 2;
+                if (l2_rrpv[set][i] > maxRRPV)
+                    l2_rrpv[set][i] = maxRRPV;
+                continue;
+            }
+#endif
+            l2_rrpv[set][i]++;
+        }
+    }
+
+    // WE SHOULD NOT REACH HERE
+    assert(0);
+    return 0;
+}
+
+// called on every cache hit and cache fill
+void CACHE::l2c_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit, uint8_t isInstruction)
+{
+    string TYPE_NAME;
+    if (type == LOAD)
+        TYPE_NAME = "LOAD";
+    else if (type == RFO)
+        TYPE_NAME = "RFO";
+    else if (type == PREFETCH)
+        TYPE_NAME = "PF";
+    else if (type == WRITEBACK)
+        TYPE_NAME = "WB";
+    else if (type == LOAD_TRANSLATION)
+	    TYPE_NAME = "L_TN";
+    else if (type == PREFETCH_TRANSLATION)
+	    TYPE_NAME = "P_TN";
+    else if (type == TRANSLATION_FROM_L1D)
+	    TYPE_NAME = "TN_L1D";
+    else
+        assert(0);
+
+    if (hit)
+        TYPE_NAME += "_HIT";
+    else
+        TYPE_NAME += "_MISS";
+
+    if ((type == WRITEBACK) && ip)
+        assert(0);
+
+    if (hit){ // promotion
+        if (isInstruction){
+#if INSTR_PROMOTE_MODE == 0
+            l2_rrpv[set][way] = 0;
+#elif INSTR_PROMOTE_MODE == 1
+            if (l2_rrpv[set][way] > 0)
+                l2_rrpv[set][way]--;
+#endif
+        }
+        else {
+#if DATA_PROMOTE_MODE == 0
+            l2_rrpv[set][way] = 0;
+#elif DATA_PROMOTE_MODE == 1
+            if (l2_rrpv[set][way] > 0)
+                l2_rrpv[set][way]--;
+#elif DATA_PROMOTE_MODE == 2
+            // unchanged
+#endif
+        }
+    }
+    else { // insertion
+        if (isInstruction){
+            l2_rrpv[set][way] = INSTR_INSERT_RRPV;
+        }
+        else {
+#if DATA_INSERT_MODE == 0
+            l2_rrpv[set][way] = maxRRPV - 1;
+#elif DATA_INSERT_MODE == 1
+            l2_rrpv[set][way] = maxRRPV;
+#elif DATA_INSERT_MODE == 2
+            bip_counter++;
+            if (bip_counter >= BIP_EPSILON) {
+                bip_counter = 0;
+                l2_rrpv[set][way] = maxRRPV - 1;
+            }
+            else
+                l2_rrpv[set][way] = maxRRPV;
+#endif
+        }
+    }
+}
+
+// use this function to print out your own stats at the end of simulation
+void CACHE::l2c_replacement_final_stats()
+{
+
+}

@@ -1,0 +1,117 @@
+\documentclass[10pt]{article}
+\usepackage[margin=2cm]{geometry}
+\usepackage{booktabs,graphicx,float,enumitem,hyperref}
+\setlength{\parindent}{0pt}\setlength{\parskip}{4pt}
+\title{CS683 PA2 -- Summary\\ \large Task 1: Stride Pattern Prefetcher (L1D); Task 2A: Instruction-conscious L2 replacement (I-RRIP); Task 3: SPP + prefetch-aware Dynamic I-RRIP}
+\date{}
+\begin{document}\maketitle
+\section*{Task 1A: IP-stride (baseline prefetcher)}
+\texttt{ip\_stride.l1d\_pref} keeps 24 IP trackers (IP, last line address, last stride, LRU). On an access by a tracked IP it computes the stride from the last line; if it equals the stored stride it prefetches the next 3 strides ahead (same page only), otherwise it just stores the new stride. It therefore captures only a \emph{constant} stride and is blind to repeating non-uniform sequences such as $(1,2,3)^n$. It is tracked by a fully-associative LRU table of 24 entries, so IPs beyond 24 thrash it.
+
+\section*{Task 1B: SPP design}
+\begin{itemize}[nosep]
+\item \textbf{IP table} (256 entries, direct mapped, 8-bit tag): last line (low 16 bits), last stride, a 2-bit uniform-stride confidence, and a signature of the last 3 strides (7 bits each).
+\item \textbf{Pattern table} (256 entries) indexed by a hash of the 3-stride signature $\rightarrow$ (next stride, 2-bit confidence). A \textbf{fallback table} (64 entries) is keyed by the last 2 strides and is used when the 3-stride entry is not confident.
+\item \textbf{Prediction}: if the uniform confidence is high the constant stride is used; otherwise the pattern table is walked, feeding each predicted stride back into the signature, up to the current degree. Prefetching stops at the 4KB page boundary and when the prefetch queue is full. Only loads/RFOs train. Prefetches fill L1D unless the MSHR is more than half full, then L2.
+\item \textbf{Accuracy throttling}: a 64-entry filter of recently filled prefetch lines; a demand hit on it counts as useful. Every 256 prefetch fills accuracy is computed and the degree set: $\ge$75\%$\to$6, $\ge$50\%$\to$4, $\ge$25\%$\to$2, else 1 (initial 4).
+\end{itemize}
+
+\section*{Results (25M warmup + 25M simulated instructions)}
+Speedup = IPC / baseline IPC (mean = geometric). Coverage = (baseline L1D load misses $-$ misses with prefetcher)/baseline. Accuracy is the simulator's (useful / prefetches issued to the lower level).
+\input{tables.tex}
+\begin{figure}[H]\centering
+\includegraphics[width=.48\linewidth]{../results/task1/speedup.png}\includegraphics[width=.48\linewidth]{../results/task1/mpki.png}\\
+\includegraphics[width=.48\linewidth]{../results/task1/accuracy.png}\includegraphics[width=.48\linewidth]{../results/task1/coverage.png}
+\end{figure}
+SPP beats IP-stride on every trace in speedup and coverage (mean speedup 1.0122 vs 1.0024; coverage 8.5\% vs 2.8\%), and has higher accuracy on Trace 2 and 3 (tied on Trace 1). Gains are small in absolute terms: a miss breakdown showed most L1D misses come from IPs not in the table, strides beyond a page (forbidden by the spec) or irregular accesses; only about 3--5\% of misses occur while a stride pattern is active.
+
+\section*{Storage overhead (exact)}
+\begin{tabular}{lll r}\toprule
+Structure & Entries & Bits per entry & Total bits\\\midrule
+IP table & 256 & valid 1 + tag 8 + last line 16 + last stride 7 + uni conf 2 + 3$\times$7 signature + hist count 2 = 57 & 14592\\
+Pattern table & 256 & stride 7 + conf 2 = 9 & 2304\\
+Fallback table & 64 & stride 7 + conf 2 = 9 & 576\\
+Recent-prefetch filter & 64 & valid 1 + tag 10 = 11 & 704\\
+Counters & -- & issued 9 + useful 9 + degree 3 & 21\\\midrule
+\textbf{Total} & & & \textbf{18197 bits (2274.6 B $\approx$ 2.2 KB)}\\\bottomrule
+\end{tabular}
+
+For comparison, the provided IP-stride uses 24 $\times$ (64+64+64+32) = 5376 bits as coded; SPP uses about 3.4$\times$ more storage.
+
+\section*{Threshold and degree rationale}
+Accuracy thresholds 75/50/25\% divide accuracy into four bands: above 75\% prefetches are almost always used, so aggressive depth (6) is cheap; 50--75\% is the normal band (4); 25--50\% means over half the prefetches are wasted, so depth is halved (2); below 25\% prefetching costs more bandwidth and L1D pollution than it saves, so only one line is issued. The values are round quartile boundaries; I validated them by sweeping: thresholds 50/30/10, 60/40/20, 90/70/40 and degree sets (8,4,2,1), (8,6,4,2) all lie within $\pm$0.1\% of mean speedup (1.0115--1.0129), so the result is insensitive to them. Fixed degrees 1/2/4/6 give mean speedups 1.0076/1.0091/1.0101/1.0102, so deeper is better up to 4, and flat beyond. \textbf{Honest finding:} dynamic throttling gives the same speedup as fixed degree 4 (1.0122 vs 1.0124) but 4--9 points higher accuracy, i.e.\ it saves bandwidth without losing performance.
+
+\section*{Ablations and design validation}
+\begin{tabular}{lcc}\toprule Configuration & Mean speedup & Note\\\midrule
+Uniform stride only (no pattern table) & 1.0043 & $\approx$ IP-stride-like\\
+Pattern table, no fallback & 1.0100 & \\
+Pattern table + fallback (final) & 1.0122 & \\\bottomrule\end{tabular}
+
+IP-table size (without fallback): 64/128/256/512/1024 entries $\to$ 1.0054/1.0078/1.0100/1.0107/1.0111 (6.7/10.3/17.6/32.2/61.4 Kbit); 256 chosen as the knee. A single 2-stride table alone reached 1.0126, within noise of the final hybrid; the hybrid was kept because the 3-stride signature disambiguates longer patterns. Synthetic tests (uniform, non-uniform, phase changes, random, interleaved IPs) give about 97\% coverage on regular streams, about 0\% on random, and 0 page-boundary violations in 186K prefetches; the one weakness is interleaved IPs sharing a signature in the pattern table (78\%), a known trade-off since IP bits in the index lowered real-trace speedup.
+
+\section*{Task 2A: Instruction-conscious L2 replacement (I-RRIP)}
+All Task 2 runs use no L1D prefetcher, so the replacement policy is evaluated in isolation (Task 3 combines it with SPP). The baseline is LRU at L2.
+
+\textbf{Exposing instruction information.} \texttt{update\_replacement\_state} was extended with a 9th parameter \texttt{isInstruction} for every cache (declarations in \texttt{inc/cache.h}, all \texttt{replacement/*\_repl} definitions). The six call sites in \texttt{src/cache.cc} pass the packet's \texttt{instruction} field (MSHR entry on fills, RQ/WQ/PQ entry on hits); the BTB calls in \texttt{src/ooo\_cpu.cc} pass 0. For eviction, the policy reads the per-line \texttt{BLOCK::instruction} bit, which \texttt{fill\_cache} already sets for L2C lines filled by instruction loads/prefetches, through the \texttt{current\_set} argument of \texttt{find\_victim}.
+
+\textbf{Policy} (\texttt{replacement/irrip.l2c\_repl}, 2-bit RRPV as in SRRIP):
+\begin{itemize}[nosep]
+\item \textbf{Insertion:} instruction lines at RRPV 1, data lines at RRPV 3 (SRRIP: both at 2).
+\item \textbf{Promotion:} an instruction hit sets RRPV to 0; a data hit decrements RRPV by 1 (SRRIP: both to 0).
+\item \textbf{Eviction:} among lines at RRPV 3, a data line is evicted before an instruction line; aging is unchanged.
+\end{itemize}
+
+\textbf{Results} (25M warmup + 25M simulation instructions; speedup is geometric mean over the three traces).
+\input{tables2a.tex}
+\begin{figure}[H]\centering
+\includegraphics[width=.48\linewidth]{../results/task2a/speedup.png}\includegraphics[width=.48\linewidth]{../results/task2a/l2_mpki.png}\\
+\includegraphics[width=.48\linewidth]{../results/task2a/l2_instr_mpki.png}\includegraphics[width=.48\linewidth]{../results/task2a/l2_data_mpki.png}
+\end{figure}
+\textbf{Findings.} I-RRIP reaches a mean speedup of 1.0112, against 1.0004 for SRRIP. It cuts the mean L2 instruction load MPKI from 9.91 (SRRIP) to 6.52 ($-$34\%), at the cost of data load MPKI rising from 5.98 to 7.68 ($+$28\%); total L2 load MPKI still falls 11\% (15.89 to 14.20), because instruction misses are both the larger share and the more costly ones (an instruction miss stalls the front end, while out-of-order execution hides part of a data miss). The gain is concentrated on Trace 2, the trace with by far the highest L2 instruction MPKI: instruction MPKI almost halves (17.98 to 9.44) and IPC improves 3.3\%. Trace 3 gains 0.2\%. Trace 1 loses 0.14\%: its LLC misses about 69\% of the loads it receives under every policy, so the extra L2 data misses go to DRAM, and they outnumber the instruction misses saved (data MPKI $+$2.21 versus instruction MPKI $-$1.25 relative to SRRIP). Blindly prioritising instructions is therefore not always right, which is the motivation for Task 2B.
+
+{\sloppy\textbf{How the design was chosen.} Every part of the policy was made a compile-time knob (\texttt{replacement/irrip\_policies.l2c\_repl}): instruction insertion RRPV (0/1/2), data insertion (RRPV 2 / RRPV 3 / bimodal: RRPV 3 with every 32nd insertion at 2), instruction promotion (to 0 / decrement), data promotion (to 0 / decrement / unchanged), and two eviction options (prefer a data victim among RRPV-3 lines; age data lines by 2 instead of 1). The full grid is $3\cdot3\cdot2\cdot3\cdot2\cdot2 = 216$ configurations, so the search was done in two stages (\texttt{scripts/run\_irrip\_variants.sh} with \texttt{scripts/irrip\_stage\{1,2\}.cfg}). \emph{Stage 1} (14 configurations) turned on one change at a time, both on top of SRRIP (an ablation of insertion, promotion and eviction) and on top of I+P, the combination of instruction insertion at RRPV 0 (instruction hits to 0) and data decrement on hit. The all-SRRIP setting reproduces \texttt{rrip.l2c\_repl} exactly, which validates the knob implementation.\par}
+
+\smallskip\noindent\begin{minipage}{\linewidth}\textbf{Stage 1: speedup over baseline}\\[2pt]
+\input{tables2a_stage1.tex}\end{minipage}
+\begin{figure}[H]\centering\includegraphics[width=.7\linewidth]{../results/task2a/ablation_stage1.png}\end{figure}
+\emph{Stage 2} took the knobs that changed the mean speedup by at least 0.05\% in stage 1 (instruction insertion, data insertion, both eviction options), each at its two best values, and ran their full factorial ($2^4 = 16$ configurations). Promotion was fixed at instruction-to-0 and data-decrement: the instruction options tied within 0.01\%, data-to-0 was clearly worse, and data-unchanged tied with decrement but is unsafe with data inserted at RRPV 3 (see below). Two stage-2 points repeat stage-1 points and reproduced bit-exactly.
+
+\smallskip\noindent\begin{minipage}{\linewidth}\textbf{Stage 2: speedup over baseline}\\[2pt]
+\input{tables2a_stage2.tex}\end{minipage}
+
+\medskip
+\textbf{Rationale: insertion (modified).} Insertion decides how long a line survives before it has proved itself, so it is the most direct lever for prioritising instructions. Code lines are reused across loop iterations and repeated calls, but often at reuse distances larger than the L1I. Inserting data at RRPV 3 makes a new data line the first eviction candidate unless it is reused; this was the largest single improvement in stage 1 (1.0058 to 1.0089), which indicates that most data lines reaching L2 in these traces are not reused before they would be evicted anyway. Instructions are inserted at RRPV 1 rather than 0. This is the one result that only the full factorial revealed: with data inserted at RRPV 2, instruction RRPV 0 was slightly better (1.0058 versus 1.0052), but once data is inserted at RRPV 3, RRPV 1 is better in all eight pairings, by 0.17--0.28\%. Data at RRPV 3 already gives code a two-step lead, so RRPV 0 is no longer needed to protect code from data; it only lets code that is fetched once (cold paths, one-time initialisation) push out code that is actually reused. Bimodal data insertion was within 0.04\% of RRPV 3 in every stage-2 pairing (and never better) but adds a counter, so plain RRPV 3 was kept.
+
+\textbf{Rationale: promotion (modified for data only).} An instruction hit is strong evidence of a hot code path, so it keeps SRRIP's promote-to-0 rule. The decrement alternative tied (1.0059 versus 1.0058), so the simpler and standard rule was kept. Data uses frequency-based promotion: one hit moves a line one step nearer, so only repeatedly reused data earns the protection code gets on its first hit. Promoting data to 0 on a hit would undo the insertion bias after a single reuse; measured against decrementing, it lowered the mean speedup from 1.0058 to 1.0043. Leaving data unpromoted tied with decrement on its own (1.0059), but combined with insertion at RRPV 3 a reused data line could never leave the eviction position, so decrement is the safe choice.
+
+\textbf{Rationale: eviction (modified as a tie-breaker only).} SRRIP evicts the first line it finds at RRPV 3. Preferring a data line among the RRPV-3 candidates costs nothing extra, because the instruction bit is already stored per line. It only matters when code and data are equally old, and then evicting the data line is consistent with the rest of the policy. On its own it gave the largest gain of any single change on top of SRRIP (1.0004 to 1.0058), and in stage 2 it added about 0.05\%. Aging data faster was \emph{not} adopted: on top of the chosen insertion and promotion it moved the mean speedup by at most 0.01\% (1.0112 versus 1.0113), but it raised the Trace 1 loss from 0.14\% to 0.26\% and needs a second aging rule. The aging procedure is therefore left as in SRRIP.
+
+\textbf{Storage.} Per line: 2-bit RRPV (as SRRIP) and 1 instruction bit, which ChampSim's L2C already keeps in \texttt{BLOCK}. For 1024 sets $\times$ 8 ways this is 16384 + 8192 = 24576 bits (3 KB), of which only the 8192 instruction bits (1 KB) are on top of SRRIP. No counters or tables are added.
+
+\section*{Task 2B: Dynamic I-RRIP}
+% DRAFT: update once Task 2B code and runs are final (leader count, follower-mode stats on Trace 1)
+
+\textbf{Choice of the I-RRIP component.} Task 2A and Task 2B use different I-RRIP settings, because the two tasks are asked different questions. In Task 2A the policy is static: whatever it does to a trace, that trace keeps it. So it was chosen on all three traces, and the setting without faster data aging was kept. Its mean speedup is within noise of the best one (1.0112 versus 1.0113), and it loses less on Trace 1 (0.14\% versus 0.26\%).
+
+In Task 2B the I-RRIP rules are only one of two options. Set dueling falls back to SRRIP on a workload where they hurt. Trace 1 is such a workload: replacement barely matters there (SRRIP 0.9999 against LRU), and every I-RRIP setting was slightly below the baseline. For Trace 1 the dynamic policy should therefore pick SRRIP, not a gentler I-RRIP. The I-RRIP option only needs to be strong on the workloads where it gets picked. Trace 2 is the case the problem statement describes: a large code footprint, with the highest L2 instruction MPKI under SRRIP (17.98). The I-RRIP option is therefore tuned for Trace 2. Adding faster data aging raises Trace 2's speedup from 1.0334 to 1.0348 and cuts its instruction MPKI from 9.43 to 9.03. The cost is one extra aging rule, used only in sets running I-RRIP.
+
+The fallback is not free. The I-RRIP leader sets (32 of the 1024 sets) always run I-RRIP, so Trace 1 still pays its cost there. Whether the followers really settle on SRRIP for Trace 1 is checked below with the dynamic-policy statistics (final PSEL and the share of follower updates done in each mode).
+
+\section*{Task 3: SPP with prefetch-aware Dynamic I-RRIP}
+\textbf{Policy} (\texttt{replacement/dyn\_irrip.l2c\_repl}, applied in I-RRIP mode only; the RRIP leader sets are unchanged so set dueling still compares against plain RRIP). A prefetched data line is inserted at RRPV 3 (first eviction candidate) instead of 2, and a prefetch request that hits a resident line does not promote it. Instruction lines are unchanged (insert/promote to 0); demand hits on data still promote by one step, so a prefetched line that is actually used moves up. Eviction is unchanged.
+
+\textbf{Rationale.} SPP brings lines into L1D, so the L2 copy of a prefetched line is a duplicate that is only needed if the L1D copy is evicted before use; a speculative line should therefore not displace demand data or instruction lines, which the L2 is supposed to protect. A prefetch hit is not evidence of reuse (the prefetcher re-requests a line it already fetched), so promoting on it would keep stale lines alive. Inserting at the distant position lets a useless prefetch leave quickly, while a demand hit still rescues a useful one. The insertion RRPV was swept (1/2/3); distant insertion is best on mean speedup.
+
+\textbf{Results} (25M warmup + 25M simulation instructions; speedup is geometric mean over the three traces).
+\input{tables3.tex}
+\begin{figure}[H]\centering
+\includegraphics[width=.48\linewidth]{../results/task3/speedup.png}\includegraphics[width=.48\linewidth]{../results/task3/l2_mpki.png}\\
+\includegraphics[width=.48\linewidth]{../results/task3/l2_instr_mpki.png}\includegraphics[width=.48\linewidth]{../results/task3/l2_data_mpki.png}\\
+\includegraphics[width=.48\linewidth]{../results/task3/accuracy.png}\includegraphics[width=.48\linewidth]{../results/task3/coverage.png}\\
+\includegraphics[width=.48\linewidth]{../results/task3/l1d_mpki.png}\includegraphics[width=.48\linewidth]{../results/task3/pf_insert_sweep.png}
+\end{figure}
+\textbf{Findings.} SPP + prefetch-aware Dyn I-RRIP reaches mean speedup 1.0146, against 1.0122 for SPP alone, 1.0017 for Dynamic I-RRIP alone and 1.0139 for SPP with the prefetch-unaware Dynamic I-RRIP; its IPC is highest on all three traces (0.2344/0.2564/0.3875), so it outperforms both SPP and Dynamic I-RRIP in IPC. The margins are small: on Trace 1 the gain over SPP is $\approx$0.0001 IPC, and the gain over the prefetch-unaware policy is 0.0007 in mean speedup, within noise for a single 25M-instruction window. The effect is clearest at L2: mean L2 load MPKI falls from 15.01 (unaware) to 14.91, and L2 instruction load MPKI from 9.58 to 9.47, because prefetch fills no longer displace instruction lines. L2 data load MPKI is slightly higher than unaware (5.43 vs 5.42), and prefetch accuracy and coverage at L1D are essentially unchanged (49.5\% / 8.7\%), since the change affects L2 residency, not what is prefetched.
+
+\section*{Limitations}
+One 25M-instruction window per trace (the simulator is deterministic, but differences of $\sim$0.1\% may not generalise). ChampSim's warmup skips front-end stalls, so the measured region starts with caches and tables relatively cold; this affects all configurations equally. The accuracy counter does not track prefetches that fill L2.
+\end{document}
