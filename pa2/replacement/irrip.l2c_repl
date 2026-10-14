@@ -4,7 +4,7 @@
 uint32_t l2_rrpv[L2C_SET][L2C_WAY];
 
 /*
-    I-RRIP POLICY (configuration s2_i1_d3_p1_a0 from replacement/irrip_policies.l2c_repl)
+    I-RRIP POLICY
     Insertion: instruction lines at RRPV 1, data lines at RRPV 3 (maxRRPV)
     Promotion: instruction lines to RRPV 0, data lines decrement RRPV by 1
     Eviction:  among lines at maxRRPV, evict a data line before an instruction line;

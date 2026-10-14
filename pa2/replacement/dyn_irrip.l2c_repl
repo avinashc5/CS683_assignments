@@ -1,12 +1,15 @@
 #include "cache.h"
 
 #define maxRRPV 3
-#define NUM_LEADER_SETS 32                          // leader sets per policy, must be a power of 2
-#define REGION (L2C_SET / NUM_LEADER_SETS)          // cache is split into NUM_LEADER_SETS regions of REGION sets
-#define REGION_BITS __builtin_ctz(REGION)
+
+// 32 leader sets per policy: the 1024 sets are split into 32 regions of 32 sets, one SRRIP and one IRRIP leader per region
+#define REGION 32                                   // sets per region
+#define REGION_BITS 5                               // log2(REGION)
+#define PSEL_MAX 1023                               // 10-bit saturating PSEL counter
+#define PSEL_MSB(p) ((p) >> 9)                      // follower policy: 1 = IRRIP, 0 = SRRIP
 
 uint32_t l2_rrpv[L2C_SET][L2C_WAY];
-uint8_t psel;
+uint16_t psel;
 
 // stats (counted only after warmup)
 uint64_t follower_updates[2];           // follower set updates in SRRIP (0) / IRRIP (1) mode
@@ -15,11 +18,11 @@ uint64_t leader_misses[2][2];           // [leader policy SRRIP/IRRIP][data/inst
 uint8_t last_follower_policy;
 
 // Check which leader set the cache line belongs to
-// One SRRIP leader and one IRRIP leader per region: the offset within the region is compared
-// against the region index (leader 0) or its complement (leader 1), so leaders are spread
-// evenly across the cache and the two groups never overlap
 uint8_t leader(uint32_t set)
 {
+    // One SRRIP leader and one IRRIP leader per region: the offset within the region is compared
+    // against the region index (leader 0) or its complement (leader 1), so leaders are spread
+    // evenly across the cache and the two groups never overlap
     if ((set & (REGION - 1)) == ((set >> REGION_BITS) & (REGION - 1))) // Leader 0
         return 0;
     else if ((set & (REGION - 1)) == ((~(set >> REGION_BITS)) & (REGION - 1))) // Leader 1
@@ -33,7 +36,7 @@ void update_psel(uint32_t set)
 {
     uint8_t leader_number = leader(set);
     if (leader_number == 0){ // SRRIP eviction policy
-        if (psel < 255) psel++;
+        if (psel < PSEL_MAX) psel++;
     }
     else if (leader_number == 1){ // IRRIP eviction policy
         if (psel > 0) psel--;
@@ -43,10 +46,9 @@ void update_psel(uint32_t set)
 // find the policy for the current set
 uint8_t find_policy(uint32_t set)
 {
-    uint8_t policy = (psel >> 7); // Find out which policy is to be followed using psel
+    uint8_t policy = PSEL_MSB(psel); // Find out which policy is to be followed using psel
     uint8_t leader_number = leader(set);
     // But check whether a leader set or not
-    // Currently, the leader sets are at the start, another way is spreading them across (probably some kind of hashing)
     if (leader_number == 0){ // SRRIP eviction policy
         policy = 0;
     }
@@ -60,7 +62,7 @@ uint8_t find_policy(uint32_t set)
 // initialize replacement state
 void CACHE::l2c_initialize_replacement()
 {
-    cout << "Initialize DRRIP state for L2C" << endl;
+    cout << "Initialize Dynamic IRRIP state for L2C" << endl;
 
     for (int i = 0; i < L2C_SET; i++){
         for (int j = 0; j < L2C_WAY; j++){
@@ -68,13 +70,13 @@ void CACHE::l2c_initialize_replacement()
         }
     }
 
-    psel = 128;
+    psel = 512;
 
     follower_updates[0] = follower_updates[1] = 0;
     mode_switches = 0;
     for (int i = 0; i < 2; i++)
         leader_misses[i][0] = leader_misses[i][1] = 0;
-    last_follower_policy = psel >> 7;
+    last_follower_policy = PSEL_MSB(psel);
 }
 
 // find replacement victim
@@ -166,10 +168,10 @@ void CACHE::l2c_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t wa
         else
             follower_updates[policy]++;
 
-        if ((psel >> 7) != last_follower_policy)
+        if (PSEL_MSB(psel) != last_follower_policy)
             mode_switches++;
     }
-    last_follower_policy = psel >> 7;
+    last_follower_policy = PSEL_MSB(psel);
 
     if (policy == 0){ // SRRIP
         if (hit)
@@ -180,7 +182,6 @@ void CACHE::l2c_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t wa
     else { // IRRIP
         /*
             POLICY
-            (configuration s2_i1_d3_p1_a1 from replacement/irrip_policies.l2c_repl)
             Insertion: For instructions, insert at 1. For non-instructions, insert at 3 (maxRRPV)
             Promotion: For instructions, promote to 0. For non-instructions, promote to rrpv - 1
             Eviction: Among lines at maxRRPV, evict a data line first; when aging, data lines age by 2
@@ -208,7 +209,7 @@ void CACHE::l2c_replacement_final_stats()
     uint64_t total_follower = follower_updates[0] + follower_updates[1];
 
     cout << endl << "Dynamic IRRIP stats (after warmup)" << endl;
-    cout << "Final PSEL: " << +psel << " (follower mode: " << ((psel >> 7) ? "IRRIP" : "SRRIP") << ")" << endl;
+    cout << "Final PSEL: " << +psel << " (follower mode: " << (PSEL_MSB(psel) ? "IRRIP" : "SRRIP") << ")" << endl;
     cout << "Follower updates SRRIP: " << follower_updates[0] << "  IRRIP: " << follower_updates[1];
     if (total_follower)
         cout << "  IRRIP fraction: " << (double)follower_updates[1] / total_follower;
