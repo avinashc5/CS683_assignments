@@ -1,0 +1,17 @@
+\begin{tabular}{lrrrr}\toprule
+Configuration & Trace1 & Trace2 & Trace3 & Mean \\ \midrule
+SRRIP (all knobs off) & 0.9999 & 1.0022 & 0.9993 & 1.0004 \\
+Insertion only (instr RRPV 0) & 1.0000 & 1.0130 & 0.9999 & 1.0043 \\
+Promotion only (data decrement) & 1.0008 & 1.0085 & 0.9995 & 1.0029 \\
+Eviction only (prefer data) & 0.9998 & 1.0185 & 0.9993 & 1.0058 \\
+Eviction only (age data faster) & 1.0004 & 1.0088 & 0.9994 & 1.0029 \\
+Insertion + promotion (I+P) & 0.9998 & 1.0176 & 0.9999 & 1.0058 \\
+I+P + prefer data & 0.9994 & 1.0229 & 1.0000 & 1.0074 \\
+I+P + age data faster & 0.9993 & 1.0196 & 1.0001 & 1.0063 \\
+I+P + both eviction options & 0.9983 & 1.0251 & 1.0000 & 1.0077 \\
+I+P, instr insert RRPV 1 & 1.0003 & 1.0154 & 0.9999 & 1.0052 \\
+I+P, data insert RRPV 3 & 0.9968 & 1.0291 & 1.0013 & 1.0089 \\
+I+P, data insert bimodal & 0.9971 & 1.0283 & 1.0008 & 1.0087 \\
+I+P, data not promoted & 0.9978 & 1.0202 & 1.0000 & 1.0059 \\
+I+P, instr decrement on hit & 1.0001 & 1.0176 & 1.0001 & 1.0059 \\
+\bottomrule\end{tabular}

@@ -102,7 +102,7 @@ plot("speedup", "Speedup over baseline", "Task 3: prefetch insertion RRPV sweep"
 # LaTeX tables for report/Summary.tex
 tex = []
 for key, title, fmt in metrics:
-    tex.append("\\textbf{%s}\\\\[2pt]\n\\begin{tabular}{lrrrr}\\toprule\nConfig & Trace1 & Trace2 & Trace3 & Mean \\\\ \\midrule" % title)
+    tex.append("\\textbf{%s}\\\\[2pt]\n\\begin{tabular}{lrrrr}\\toprule\nConfig & Trace1 & Trace2 & Trace3 & Mean \\\\ \\midrule" % title.replace("%", "\\%"))
     for c, lab in cfgs:
         v = [D[c][t][key] for t in TRACES]
         m = gmean(v) if key == "speedup" else mean(v)

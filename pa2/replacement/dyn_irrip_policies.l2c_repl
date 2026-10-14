@@ -1,0 +1,248 @@
+#include "cache.h"
+
+#define maxRRPV 3
+
+// design knobs (Task 2B sweep: scripts/run_dyn_variants.sh); the chosen configuration is in replacement/dyn_irrip.l2c_repl
+#ifndef NUM_LEADER_SETS
+#define NUM_LEADER_SETS 32                          // leader sets per policy, must be a power of 2
+#endif
+#ifndef LEADER_SPREAD
+#define LEADER_SPREAD 1                             // 0: contiguous (sets 0..N-1 SRRIP, N..2N-1 IRRIP), 1: hashed across regions
+#endif
+#ifndef PSEL_BITS
+#define PSEL_BITS 8                                 // width of the saturating PSEL counter
+#endif
+#ifndef PSEL_FORCE
+#define PSEL_FORCE 0                                // sanity check only: 0 normal, 1 followers always SRRIP, 2 followers always IRRIP
+#endif
+
+#define REGION (L2C_SET / NUM_LEADER_SETS)          // cache is split into NUM_LEADER_SETS regions of REGION sets
+#define REGION_BITS __builtin_ctz(REGION)
+#define PSEL_MAX ((1u << PSEL_BITS) - 1)
+#define PSEL_MSB(p) ((p) >> (PSEL_BITS - 1))
+
+uint32_t l2_rrpv[L2C_SET][L2C_WAY];
+uint16_t psel;
+
+// stats (counted only after warmup)
+uint64_t follower_updates[2];           // follower set updates in SRRIP (0) / IRRIP (1) mode
+uint64_t mode_switches;                 // number of times the follower policy (psel MSB) flipped
+uint64_t leader_misses[2][2];           // [leader policy SRRIP/IRRIP][data/instruction]
+uint8_t last_follower_policy;
+
+// Check which leader set the cache line belongs to
+uint8_t leader(uint32_t set)
+{
+#if LEADER_SPREAD == 0
+    // contiguous: the first NUM_LEADER_SETS sets lead SRRIP, the next NUM_LEADER_SETS lead IRRIP
+    if (set < NUM_LEADER_SETS)
+        return 0;
+    else if (set < 2 * NUM_LEADER_SETS)
+        return 1;
+    else
+        return 2;
+#else
+    // One SRRIP leader and one IRRIP leader per region: the offset within the region is compared
+    // against the region index (leader 0) or its complement (leader 1), so leaders are spread
+    // evenly across the cache and the two groups never overlap
+    if ((set & (REGION - 1)) == ((set >> REGION_BITS) & (REGION - 1))) // Leader 0
+        return 0;
+    else if ((set & (REGION - 1)) == ((~(set >> REGION_BITS)) & (REGION - 1))) // Leader 1
+        return 1;
+    else
+        return 2;
+#endif
+}
+
+// update the psel depending on the type of miss
+void update_psel(uint32_t set)
+{
+    uint8_t leader_number = leader(set);
+    if (leader_number == 0){ // SRRIP eviction policy
+        if (psel < PSEL_MAX) psel++;
+    }
+    else if (leader_number == 1){ // IRRIP eviction policy
+        if (psel > 0) psel--;
+    }
+}
+
+// find the policy for the current set
+uint8_t find_policy(uint32_t set)
+{
+#if PSEL_FORCE == 0
+    uint8_t policy = PSEL_MSB(psel); // Find out which policy is to be followed using psel
+#else
+    uint8_t policy = PSEL_FORCE - 1;
+#endif
+    uint8_t leader_number = leader(set);
+    // But check whether a leader set or not
+    if (leader_number == 0){ // SRRIP eviction policy
+        policy = 0;
+    }
+    else if (leader_number == 1){ // IRRIP eviction policy
+        policy = 1;
+    }
+    return policy;
+}
+
+
+// initialize replacement state
+void CACHE::l2c_initialize_replacement()
+{
+    cout << "Initialize DRRIP state for L2C (leaders " << NUM_LEADER_SETS << ", spread " << LEADER_SPREAD
+         << ", PSEL bits " << PSEL_BITS << ", force " << PSEL_FORCE << ")" << endl;
+
+    for (int i = 0; i < L2C_SET; i++){
+        for (int j = 0; j < L2C_WAY; j++){
+            l2_rrpv[i][j] = maxRRPV;
+        }
+    }
+
+    psel = 1u << (PSEL_BITS - 1);
+
+    follower_updates[0] = follower_updates[1] = 0;
+    mode_switches = 0;
+    for (int i = 0; i < 2; i++)
+        leader_misses[i][0] = leader_misses[i][1] = 0;
+    last_follower_policy = PSEL_MSB(psel);
+}
+
+// find replacement victim
+uint32_t CACHE::l2c_find_victim(uint32_t cpu, uint64_t instr_id, uint32_t set, const BLOCK *current_set, uint64_t ip, uint64_t full_addr, uint32_t type)
+{
+    uint8_t policy = find_policy(set);
+
+    if (policy == 0){ // SRRIP eviction policy
+        while (1)
+        {
+            for (int i = 0; i < L2C_WAY; i++)
+                if (l2_rrpv[set][i] == maxRRPV)
+                    return i;
+
+            for (int i = 0; i < L2C_WAY; i++)
+                l2_rrpv[set][i]++;
+        }
+    }
+    else { // IRRIP eviction policy
+        while (1)
+        {
+            // first look for a data line at maxRRPV
+            for (int i = 0; i < L2C_WAY; i++)
+                if (l2_rrpv[set][i] == maxRRPV && !current_set[i].instruction)
+                    return i;
+
+            // only instruction lines are at maxRRPV (if any)
+            for (int i = 0; i < L2C_WAY; i++)
+                if (l2_rrpv[set][i] == maxRRPV)
+                    return i;
+
+            // no line at maxRRPV, age the set: data lines by 2, instruction lines by 1
+            for (int i = 0; i < L2C_WAY; i++) {
+                if (current_set[i].instruction)
+                    l2_rrpv[set][i]++;
+                else
+                    l2_rrpv[set][i] = min(l2_rrpv[set][i] + 2, (uint32_t)maxRRPV);
+            }
+        }
+    }
+
+    // WE SHOULD NOT REACH HERE
+    assert(0);
+    return 0;
+}
+
+// called on every cache hit and cache fill
+void CACHE::l2c_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t way, uint64_t full_addr, uint64_t ip, uint64_t victim_addr, uint32_t type, uint8_t hit, uint8_t isInstruction)
+{
+    string TYPE_NAME;
+    if (type == LOAD)
+        TYPE_NAME = "LOAD";
+    else if (type == RFO)
+        TYPE_NAME = "RFO";
+    else if (type == PREFETCH)
+        TYPE_NAME = "PF";
+    else if (type == WRITEBACK)
+        TYPE_NAME = "WB";
+    else if (type == LOAD_TRANSLATION)
+	    TYPE_NAME = "L_TN";
+    else if (type == PREFETCH_TRANSLATION)
+	    TYPE_NAME = "P_TN";
+    else if (type == TRANSLATION_FROM_L1D)
+	    TYPE_NAME = "TN_L1D";
+    else
+        assert(0);
+
+    if (hit)
+        TYPE_NAME += "_HIT";
+    else
+        TYPE_NAME += "_MISS";
+
+    if ((type == WRITEBACK) && ip)
+        assert(0);
+
+    if (hit == 0 && type == LOAD){
+        update_psel(set);
+    }
+
+    uint8_t policy = find_policy(set);
+    uint8_t leader_number = leader(set);
+
+    // stats
+    if (warmup_complete[cpu]) {
+        if (leader_number <= 1) {
+            if (hit == 0 && type == LOAD)
+                leader_misses[policy][isInstruction ? 1 : 0]++;
+        }
+        else
+            follower_updates[policy]++;
+
+        if (PSEL_MSB(psel) != last_follower_policy)
+            mode_switches++;
+    }
+    last_follower_policy = PSEL_MSB(psel);
+
+    if (policy == 0){ // SRRIP
+        if (hit)
+            l2_rrpv[set][way] = 0;
+        else
+            l2_rrpv[set][way] = maxRRPV-1;  //insert with RRPV2
+    }
+    else { // IRRIP
+        /*
+            POLICY
+            Insertion: For instructions, insert at 1. For non-instructions, insert at 3 (maxRRPV)
+            Promotion: For instructions, promote to 0. For non-instructions, promote to rrpv - 1
+            Eviction: Among lines at maxRRPV, evict a data line first; when aging, data lines age by 2
+        */
+
+        if (hit){
+            if (isInstruction){
+                l2_rrpv[set][way] = 0;
+            }
+            else {
+                if (l2_rrpv[set][way] > 0)
+                    l2_rrpv[set][way]--;
+            }
+        }
+        else if (isInstruction)
+            l2_rrpv[set][way] = 1;
+        else
+            l2_rrpv[set][way] = maxRRPV;
+    }
+}
+
+// use this function to print out your own stats at the end of simulation
+void CACHE::l2c_replacement_final_stats()
+{
+    uint64_t total_follower = follower_updates[0] + follower_updates[1];
+
+    cout << endl << "Dynamic IRRIP stats (after warmup)" << endl;
+    cout << "Final PSEL: " << +psel << " (follower mode: " << (PSEL_MSB(psel) ? "IRRIP" : "SRRIP") << ")" << endl;
+    cout << "Follower updates SRRIP: " << follower_updates[0] << "  IRRIP: " << follower_updates[1];
+    if (total_follower)
+        cout << "  IRRIP fraction: " << (double)follower_updates[1] / total_follower;
+    cout << endl;
+    cout << "Mode switches: " << mode_switches << endl;
+    cout << "SRRIP leader misses  data: " << leader_misses[0][0] << "  instr: " << leader_misses[0][1] << endl;
+    cout << "IRRIP leader misses  data: " << leader_misses[1][0] << "  instr: " << leader_misses[1][1] << endl;
+}

@@ -1,0 +1,54 @@
+\textbf{IPC}\\[2pt]
+\begin{tabular}{lrrrr}\toprule
+Config & Trace1 & Trace2 & Trace3 & Mean \\ \midrule
+Baseline (LRU) & 0.2322 & 0.2513 & 0.3819 & 0.2885 \\
+SRRIP & 0.2322 & 0.2518 & 0.3816 & 0.2885 \\
+I-RRIP (Task 2A) & 0.2319 & 0.2597 & 0.3826 & 0.2914 \\
+I-RRIP mode, static & 0.2317 & 0.2600 & 0.3826 & 0.2914 \\
+Dynamic I-RRIP & 0.2321 & 0.2597 & 0.3825 & 0.2914 \\
+\bottomrule\end{tabular}
+\medskip
+
+\textbf{Speedup over baseline}\\[2pt]
+\begin{tabular}{lrrrr}\toprule
+Config & Trace1 & Trace2 & Trace3 & Mean \\ \midrule
+Baseline (LRU) & 1.0000 & 1.0000 & 1.0000 & 1.0000 \\
+SRRIP & 0.9999 & 1.0022 & 0.9993 & 1.0004 \\
+I-RRIP (Task 2A) & 0.9986 & 1.0334 & 1.0020 & 1.0112 \\
+I-RRIP mode, static & 0.9974 & 1.0348 & 1.0020 & 1.0113 \\
+Dynamic I-RRIP & 0.9993 & 1.0335 & 1.0017 & 1.0114 \\
+\bottomrule\end{tabular}
+\medskip
+
+\textbf{L2C load MPKI}\\[2pt]
+\begin{tabular}{lrrrr}\toprule
+Config & Trace1 & Trace2 & Trace3 & Mean \\ \midrule
+Baseline (LRU) & 17.703 & 27.560 & 3.960 & 16.408 \\
+SRRIP & 17.619 & 26.012 & 4.037 & 15.889 \\
+I-RRIP (Task 2A) & 18.578 & 20.104 & 3.928 & 14.204 \\
+I-RRIP mode, static & 18.700 & 19.927 & 3.931 & 14.186 \\
+Dynamic I-RRIP & 17.665 & 20.108 & 3.937 & 13.903 \\
+\bottomrule\end{tabular}
+\medskip
+
+\textbf{L2C instruction load MPKI}\\[2pt]
+\begin{tabular}{lrrrr}\toprule
+Config & Trace1 & Trace2 & Trace3 & Mean \\ \midrule
+Baseline (LRU) & 10.368 & 18.892 & 1.124 & 10.128 \\
+SRRIP & 10.563 & 17.980 & 1.190 & 9.911 \\
+I-RRIP (Task 2A) & 9.316 & 9.435 & 0.811 & 6.520 \\
+I-RRIP mode, static & 9.242 & 9.029 & 0.792 & 6.354 \\
+Dynamic I-RRIP & 10.528 & 9.296 & 0.804 & 6.876 \\
+\bottomrule\end{tabular}
+\medskip
+
+\textbf{L2C data load MPKI}\\[2pt]
+\begin{tabular}{lrrrr}\toprule
+Config & Trace1 & Trace2 & Trace3 & Mean \\ \midrule
+Baseline (LRU) & 7.334 & 8.668 & 2.837 & 6.280 \\
+SRRIP & 7.056 & 8.032 & 2.846 & 5.978 \\
+I-RRIP (Task 2A) & 9.263 & 10.669 & 3.118 & 7.683 \\
+I-RRIP mode, static & 9.459 & 10.897 & 3.139 & 7.832 \\
+Dynamic I-RRIP & 7.137 & 10.811 & 3.133 & 7.027 \\
+\bottomrule\end{tabular}
+\medskip

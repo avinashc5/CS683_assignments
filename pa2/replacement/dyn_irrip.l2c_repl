@@ -3,12 +3,15 @@
 #define maxRRPV 3
 #define PF_AWARE 1                                  // 1 = prefetch-aware IRRIP (Task 3), 0 = prefetch-unaware (Task 2B behaviour)
 #define PF_INSERT_RRPV maxRRPV                      // insertion RRPV of a prefetched data line in IRRIP mode (maxRRPV = evict first)
-#define NUM_LEADER_SETS 32                          // leader sets per policy, must be a power of 2
-#define REGION (L2C_SET / NUM_LEADER_SETS)          // cache is split into NUM_LEADER_SETS regions of REGION sets
-#define REGION_BITS __builtin_ctz(REGION)
+
+// 32 leader sets per policy: the 1024 sets are split into 32 regions of 32 sets, one SRRIP and one IRRIP leader per region
+#define REGION 32                                   // sets per region
+#define REGION_BITS 5                               // log2(REGION)
+#define PSEL_MAX 1023                               // 10-bit saturating PSEL counter
+#define PSEL_MSB(p) ((p) >> 9)                      // follower policy: 1 = IRRIP, 0 = SRRIP
 
 uint32_t l2_rrpv[L2C_SET][L2C_WAY];
-uint8_t psel;
+uint16_t psel;
 
 // stats (counted only after warmup)
 uint64_t follower_updates[2];           // follower set updates in SRRIP (0) / IRRIP (1) mode
@@ -18,11 +21,11 @@ uint8_t last_follower_policy;
 uint64_t pf_fills, pf_hits_no_promote;  // IRRIP mode: prefetch fills inserted at PF_INSERT_RRPV / prefetch hits that were not promoted
 
 // Check which leader set the cache line belongs to
-// One SRRIP leader and one IRRIP leader per region: the offset within the region is compared
-// against the region index (leader 0) or its complement (leader 1), so leaders are spread
-// evenly across the cache and the two groups never overlap
 uint8_t leader(uint32_t set)
 {
+    // One SRRIP leader and one IRRIP leader per region: the offset within the region is compared
+    // against the region index (leader 0) or its complement (leader 1), so leaders are spread
+    // evenly across the cache and the two groups never overlap
     if ((set & (REGION - 1)) == ((set >> REGION_BITS) & (REGION - 1))) // Leader 0
         return 0;
     else if ((set & (REGION - 1)) == ((~(set >> REGION_BITS)) & (REGION - 1))) // Leader 1
@@ -36,7 +39,7 @@ void update_psel(uint32_t set)
 {
     uint8_t leader_number = leader(set);
     if (leader_number == 0){ // SRRIP eviction policy
-        if (psel < 255) psel++;
+        if (psel < PSEL_MAX) psel++;
     }
     else if (leader_number == 1){ // IRRIP eviction policy
         if (psel > 0) psel--;
@@ -46,10 +49,9 @@ void update_psel(uint32_t set)
 // find the policy for the current set
 uint8_t find_policy(uint32_t set)
 {
-    uint8_t policy = (psel >> 7); // Find out which policy is to be followed using psel
+    uint8_t policy = PSEL_MSB(psel); // Find out which policy is to be followed using psel
     uint8_t leader_number = leader(set);
     // But check whether a leader set or not
-    // Currently, the leader sets are at the start, another way is spreading them across (probably some kind of hashing)
     if (leader_number == 0){ // SRRIP eviction policy
         policy = 0;
     }
@@ -63,7 +65,7 @@ uint8_t find_policy(uint32_t set)
 // initialize replacement state
 void CACHE::l2c_initialize_replacement()
 {
-    cout << "Initialize DRRIP state for L2C" << endl;
+    cout << "Initialize Dynamic IRRIP state for L2C" << endl;
 
     for (int i = 0; i < L2C_SET; i++){
         for (int j = 0; j < L2C_WAY; j++){
@@ -71,13 +73,13 @@ void CACHE::l2c_initialize_replacement()
         }
     }
 
-    psel = 128;
+    psel = 512;
 
     follower_updates[0] = follower_updates[1] = 0;
     mode_switches = 0;
     for (int i = 0; i < 2; i++)
         leader_misses[i][0] = leader_misses[i][1] = 0;
-    last_follower_policy = psel >> 7;
+    last_follower_policy = PSEL_MSB(psel);
     pf_fills = pf_hits_no_promote = 0;
 }
 
@@ -86,7 +88,6 @@ uint32_t CACHE::l2c_find_victim(uint32_t cpu, uint64_t instr_id, uint32_t set, c
 {
     uint8_t policy = find_policy(set);
 
-    // Currently the eviction policy is the same for both SRRIP and IRRIP, but this can be changed
     if (policy == 0){ // SRRIP eviction policy
         while (1)
         {
@@ -101,12 +102,23 @@ uint32_t CACHE::l2c_find_victim(uint32_t cpu, uint64_t instr_id, uint32_t set, c
     else { // IRRIP eviction policy
         while (1)
         {
+            // first look for a data line at maxRRPV
+            for (int i = 0; i < L2C_WAY; i++)
+                if (l2_rrpv[set][i] == maxRRPV && !current_set[i].instruction)
+                    return i;
+
+            // only instruction lines are at maxRRPV (if any)
             for (int i = 0; i < L2C_WAY; i++)
                 if (l2_rrpv[set][i] == maxRRPV)
                     return i;
 
-            for (int i = 0; i < L2C_WAY; i++)
-                l2_rrpv[set][i]++;
+            // no line at maxRRPV, age the set: data lines by 2, instruction lines by 1
+            for (int i = 0; i < L2C_WAY; i++) {
+                if (current_set[i].instruction)
+                    l2_rrpv[set][i]++;
+                else
+                    l2_rrpv[set][i] = min(l2_rrpv[set][i] + 2, (uint32_t)maxRRPV);
+            }
         }
     }
 
@@ -160,10 +172,10 @@ void CACHE::l2c_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t wa
         else
             follower_updates[policy]++;
 
-        if ((psel >> 7) != last_follower_policy)
+        if (PSEL_MSB(psel) != last_follower_policy)
             mode_switches++;
     }
-    last_follower_policy = psel >> 7;
+    last_follower_policy = PSEL_MSB(psel);
 
     if (policy == 0){ // SRRIP
         if (hit)
@@ -174,11 +186,11 @@ void CACHE::l2c_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t wa
     else { // IRRIP
         /*
             POLICY (prefetch aware)
-            Insertion: For instructions, insert at 0. For prefetched data lines, insert at PF_INSERT_RRPV (they are speculative and
-                       are already brought into L1D, so they must not displace useful demand data). For other data, insert at 2
+            Insertion: For instructions, insert at 1. For prefetched data lines, insert at PF_INSERT_RRPV (they are speculative and
+                       are already brought into L1D, so they must not displace useful demand data). For other data, insert at 3 (maxRRPV)
             Promotion: For instructions, promote to 0. A prefetch that hits is not a reuse, so it does not promote the line.
                        For demand data, promote to rrpv - 1 (this is also how a prefetched line becomes "useful" and moves up)
-            Eviction: Evict the first line that you find with maxRRPV
+            Eviction: Among lines at maxRRPV, evict a data line first; when aging, data lines age by 2
         */
 
         if (hit){
@@ -195,14 +207,14 @@ void CACHE::l2c_update_replacement_state(uint32_t cpu, uint32_t set, uint32_t wa
             }
         }
         else if (isInstruction)
-            l2_rrpv[set][way] = 0;
+            l2_rrpv[set][way] = 1;
         else if (PF_AWARE && type == PREFETCH){
             l2_rrpv[set][way] = PF_INSERT_RRPV;
             if (warmup_complete[cpu])
                 pf_fills++;
         }
         else
-            l2_rrpv[set][way] = maxRRPV - 1;
+            l2_rrpv[set][way] = maxRRPV;
     }
 }
 
@@ -212,7 +224,7 @@ void CACHE::l2c_replacement_final_stats()
     uint64_t total_follower = follower_updates[0] + follower_updates[1];
 
     cout << endl << "Dynamic IRRIP stats (after warmup)" << endl;
-    cout << "Final PSEL: " << +psel << " (follower mode: " << ((psel >> 7) ? "IRRIP" : "SRRIP") << ")" << endl;
+    cout << "Final PSEL: " << +psel << " (follower mode: " << (PSEL_MSB(psel) ? "IRRIP" : "SRRIP") << ")" << endl;
     cout << "Follower updates SRRIP: " << follower_updates[0] << "  IRRIP: " << follower_updates[1];
     if (total_follower)
         cout << "  IRRIP fraction: " << (double)follower_updates[1] / total_follower;
