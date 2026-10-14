@@ -106,7 +106,7 @@ for key, title, fmt in metrics:
     for c, lab in cfgs:
         v = [D[c][t][key] for t in TRACES]
         m = gmean(v) if key == "speedup" else mean(v)
-        f = lambda x: "--" if x != x else fmt.format(x)
+        f = lambda x: "n/a" if x != x else fmt.format(x)
         tex.append("%s & %s & %s \\\\" % (lab.replace("&", "\\&"), " & ".join(f(x) for x in v), f(m)))
     tex.append("\\bottomrule\\end{tabular}\n\\medskip\n")
 open(os.path.join(ROOT, "report", "tables3.tex"), "w").write("\n".join(tex))
