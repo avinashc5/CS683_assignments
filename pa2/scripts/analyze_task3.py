@@ -82,8 +82,13 @@ def plot(key, ylabel, title, fname, sel, ref=None, fmt="{:.3f}"):
         xs = [j + (i - (n - 1) / 2) * w for j in range(len(labels))]
         ax.bar(xs, v, w * 0.92, label=lab, color=plt.cm.tab10(i))
         for x, y in zip(xs, v):
-            ax.text(x, y, fmt.format(y), ha="center", va="bottom", fontsize=6)
+            if key == "speedup":  # 5-6 bars with 4-decimal labels: rotate so neighbouring labels do not overlap
+                ax.text(x, y, fmt.format(y), ha="center", va="bottom", fontsize=5, rotation=90)
+            else:
+                ax.text(x, y, fmt.format(y), ha="center", va="bottom", fontsize=6)
     if ref is not None: ax.axhline(ref, color="k", lw=0.8, ls="--")
+    if key == "speedup":  # speedups are all within a few % of 1, so zoom in as in Task 2
+        ax.set_ylim(0.99, None)
     ax.set_xticks(range(len(labels))); ax.set_xticklabels(labels)
     ax.set_ylabel(ylabel); ax.set_title(title)
     ax.legend(fontsize=7, frameon=False); ax.spines[["top", "right"]].set_visible(False)
